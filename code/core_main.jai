@@ -11,6 +11,6 @@ main :: ()
     }
     else
     {
-        log_error("[ERROR]:  Failure to init SDL... error: %...\n", SDL_GetError());
+        log_error("[ERROR]:  Failure to init SDL... error: %...\n", to_string(SDL_GetError()));
     }
 }

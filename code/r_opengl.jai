@@ -736,6 +736,8 @@ r_render_group_test_render :: (render_state: *Render_State, asset_manager: *Asse
     r_draw_quad(render_state, .{ 100,    0}, .{100, 100}, .{0, 0, 1, 1});
     r_draw_quad(render_state, .{ 100,  150}, .{100, 100}, .{1, 0, 1, 1});
 
+    
+    asset   := asset_get_sprite(asset_manager, "player");
     texture := asset_get_texture(asset_manager, "player");
     if !uploaded_debug_texture
     {

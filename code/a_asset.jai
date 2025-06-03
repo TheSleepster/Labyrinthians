@@ -33,6 +33,10 @@ am_init :: () -> Asset_Manager
     result.asset_allocator = za_init(GB(1));
     result.hash_data_arena = c_arena_init(MB(100));
     result.texture_hash    = c_hash_table_create(*result.hash_data_arena, 512); 
+    result.atlas_builder   = ab_init_atlas_builder(result.asset_allocator,
+                                                   2048,
+                                                   2048,
+                                                  .FORMAT_RGBA);
 
     if is_directory("../run_tree/res/textures")
     {
@@ -229,8 +233,7 @@ asset_get_sprite :: (asset_manager: *Asset_Manager, sprite_name: string, insert_
     if texture_slot
     {
         texture := *texture_slot.texture;
-        result.parent_texture = texture;
-        ab_add_texture_to_builder_atlas(asset_manager, *asset_manager.atlas_builder, result);
+        ab_add_texture_to_builder_atlas(asset_manager, *asset_manager.atlas_builder, texture, result);
     }
     else
     {
