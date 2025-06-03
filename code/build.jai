@@ -31,7 +31,7 @@ build_debug :: (workspace: Workspace)
     options.output_executable_name           = "labyrinthian_DEBUG";
     options.output_type                      = .EXECUTABLE;
     options.output_path                      = "../build/";
-    options.use_visual_studio_message_format = true;
+    options.use_visual_studio_message_format = false;
     options.use_natvis_compatible_types      = true;
     options.dead_code_elimination            = .NONE;
     options.enable_bytecode_inliner          = false;
