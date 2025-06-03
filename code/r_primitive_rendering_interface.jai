@@ -1,0 +1,183 @@
+// NOTE(Sleepster): Rotation is stored as degrees, used as radians 
+Render_Primitive_Data :: struct
+{
+    world_position     : Vector2;
+    render_size        : Vector2;
+    render_color       : Vector4;
+    rotation           : float32;
+
+    // NOTE(Sleepster): These are native and dependant on the rendergroup 
+    render_pass_id     : u32;
+    required_shader_id : u32;
+    render_layer       : u32;
+    required_texture_id: u32;
+
+    required_shader    : GPU_Shader;
+    required_material  : Render_Material;
+};
+
+Render_Line :: struct
+{
+    #as using primitive_data: Render_Primitive_Data;
+    union
+    {
+        elements: [2]Vertex;
+        struct
+        {
+            start: Vertex;
+            end  : Vertex;
+        };
+    };
+};
+
+Render_Triangle :: struct
+{
+    #as using primitive_data: Render_Primitive_Data;
+    union
+    {
+        elements: [3]Vertex;
+        struct
+        {
+            top_middle  : Vertex;
+            bottom_left : Vertex;
+            bottom_right: Vertex;
+        };
+    };
+};
+
+Render_Quad :: struct
+{
+    #as using primitive_data: Render_Primitive_Data;
+    union
+    {
+        elements: [4]Vertex;
+        struct
+        {
+            top_left    : Vertex;
+            top_right   : Vertex;
+            bottom_left : Vertex;
+            bottom_right: Vertex;
+        };
+    };
+};
+
+r_create_draw_quad :: (render_state: *Render_State,
+                       position    :  Vector2,
+                       render_size :  Vector2,
+                       draw_color  :  Vector4,
+                       texture_id  :  u32,
+                       rotation    :  float32) -> Render_Quad
+{
+    quad: Render_Quad;
+    quad.world_position = position;
+    quad.render_size    = render_size;
+    quad.render_color   = draw_color;
+    quad.rotation       = rotation;
+
+    if (render_state.draw_frame.active_view_matrix       != render_state.draw_frame.previous_view_matrix) ||
+       (render_state.draw_frame.active_projection_matrix != render_state.draw_frame.previous_projection_matrix)
+    {
+        count := render_state.draw_frame.pass_count;
+
+        render_state.draw_frame.used_projection_matrices[count] = render_state.draw_frame.active_projection_matrix;
+        render_state.draw_frame.used_view_matrices[count]       = render_state.draw_frame.active_view_matrix;
+
+        render_state.draw_frame.previous_view_matrix            = render_state.draw_frame.active_view_matrix;
+        render_state.draw_frame.previous_projection_matrix      = render_state.draw_frame.active_projection_matrix;
+
+        render_state.draw_frame.pass_count += 1;
+    }
+    quad.render_pass_id     = render_state.draw_frame.pass_count - 1;
+    quad.required_shader    = render_state.draw_frame.active_shader;
+    quad.required_shader_id = quad.required_shader.program_id;
+
+    top    := position.y;
+    bottom := position.y + render_size.y;
+    left   := position.x;
+    right  := position.x + render_size.x;
+
+    top_left     := (Vector2).{left,   top};
+    top_right    := (Vector2).{right,  top};
+    bottom_left  := (Vector2).{left,   bottom};
+    bottom_right := (Vector2).{right, bottom};
+
+    quad.required_texture_id     = texture_id;
+    if texture_id != U32_MAX
+    {
+        quad.top_left.vTexelData     = .{0, 0};
+        quad.top_right.vTexelData    = .{1, 0};
+        quad.bottom_left.vTexelData  = .{0, 1};
+        quad.bottom_right.vTexelData = .{1, 1};
+    }
+
+    if rotation != 0
+    {
+        C_x := position.x + render_size.x / 2;
+        C_y := position.y + render_size.y / 2;
+
+        cos_theta := cos(rotation);
+        sin_theta := sin(rotation);
+
+        // top_left
+        dx := top_left.x - C_x;
+        dy := top_left.y - C_y;
+        rotated_top_left_x := C_x + dx * cos_theta + dy * sin_theta;
+        rotated_top_left_y := C_y - dx * sin_theta + dy * cos_theta;
+        rotated_top_left   := (Vector2).{rotated_top_left_x, rotated_top_left_y};
+
+        // top_right
+        dx = top_right.x - C_x;
+        dy = top_right.y - C_y;
+        rotated_top_right_x := C_x + dx * cos_theta + dy * sin_theta;
+        rotated_top_right_y := C_y - dx * sin_theta + dy * cos_theta;
+        rotated_top_right   := (Vector2).{rotated_top_right_x, rotated_top_right_y};
+
+        // bottom_left
+        dx = bottom_left.x - C_x;
+        dy = bottom_left.y - C_y;
+        rotated_bottom_left_x := C_x + dx * cos_theta + dy * sin_theta;
+        rotated_bottom_left_y := C_y - dx * sin_theta + dy * cos_theta;
+        rotated_bottom_left   := (Vector2).{rotated_bottom_left_x, rotated_bottom_left_y};
+
+        // bottom_right
+        dx = bottom_right.x - C_x;
+        dy = bottom_right.y - C_y;
+        rotated_bottom_right_x := C_x + dx * cos_theta + dy * sin_theta;
+        rotated_bottom_right_y := C_y - dx * sin_theta + dy * cos_theta;
+        rotated_bottom_right   := (Vector2).{rotated_bottom_right_x, rotated_bottom_right_y};
+
+        quad.top_left.vPosition     = make_vector4(rotated_top_left, 0, 1);
+        quad.bottom_right.vPosition = make_vector4(rotated_bottom_right, 0, 1);
+        quad.top_right.vPosition    = make_vector4(rotated_top_right, 0, 1);
+        quad.bottom_left.vPosition  = make_vector4(rotated_bottom_left, 0, 1);
+    }
+    else
+    {
+        quad.top_left.vPosition     = make_vector4(top_left, 0, 1);
+        quad.bottom_left.vPosition  = make_vector4(bottom_left, 0, 1);
+        quad.top_right.vPosition    = make_vector4(top_right, 0, 1);
+        quad.bottom_right.vPosition = make_vector4(bottom_right, 0, 1);
+    }
+
+    for *element: quad.elements
+    {
+        element.vColor = draw_color;
+    }
+
+    return quad;
+}
+
+// NOTE(Sleepster): Pass Radians to this function
+r_draw_quad :: (render_state: *Render_State,
+                position    :  Vector2,
+                render_size :  Vector2,
+                draw_color  :  Vector4,
+                texture_id  :  u32     = U32_MAX,
+                rotation    :  float32 = 0.0)
+{
+    render_quad    := r_create_draw_quad(render_state, position, render_size, draw_color, texture_id, rotation);
+    current_buffer := r_get_render_group_quad_buffer(render_state);
+
+    current_buffer.quad_buffer[current_buffer.quad_count] = render_quad;
+    current_buffer.quad_count += 1;
+}
