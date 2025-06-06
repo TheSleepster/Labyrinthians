@@ -1,6 +1,5 @@
 /*
 TODO(Sleepster):
-
 - [ ] Rendering Options
 - [ ] Rendering Lines  
 - [ ] Allow the renderer to support Point Lights
@@ -719,7 +718,7 @@ r_test_render :: (render_state: *Render_State, asset_manager: *Asset_Manager)
                    null);
 }
 
-uploaded_debug_texture: bool = false;
+#no_reset uploaded_debug_texture: bool = false;
 
 r_render_group_test_render :: (render_state: *Render_State, asset_manager: *Asset_Manager)
 {
@@ -737,7 +736,8 @@ r_render_group_test_render :: (render_state: *Render_State, asset_manager: *Asse
     r_draw_quad(render_state, .{ 100,  150}, .{100, 100}, .{1, 0, 1, 1});
 
     
-    asset   := asset_get_sprite(asset_manager, "player");
+    sprite2 := asset_get_sprite(asset_manager, "null_sprite");
+    sprite  := asset_get_sprite(asset_manager, "player");
     texture := asset_get_texture(asset_manager, "player");
     if !uploaded_debug_texture
     {
@@ -750,10 +750,10 @@ r_render_group_test_render :: (render_state: *Render_State, asset_manager: *Asse
             }
         }
     }
-    r_draw_quad(render_state, .{-200,  150}, .{100, 100}, .{1, 0, 0, 1}, texture.texID, 0);
     r_draw_quad(render_state, .{ 200,  150}, .{100, 100}, .{0, 1, 0, 1}, texture.texID, 0);
     r_draw_quad(render_state, .{ 200, -150}, .{100, 100}, .{0, 0, 1, 1}, texture.texID, 0);
     r_draw_quad(render_state, .{-200, -150}, .{100, 100}, .{1, 1, 1, 1}, texture.texID, deg_to_rad(33));
+    r_draw_quad(render_state, .{-200,  150}, .{100, 100}, .{1, 0, 0, 1}, sprite.atlas_texture.texID, 0);
     
     glViewport(0, 0, 1920, 1080);
     glClearColor(0.0, 0.0, 0.0, 1.0);
@@ -783,6 +783,14 @@ r_render_group_test_render :: (render_state: *Render_State, asset_manager: *Asse
 
         shader := *working_group.bound_shader;
         glUseProgram(shader.program_id);
+
+        for tex_index: 0..working_group.group_texture_count - 1
+        {
+            glActiveTexture(GL_TEXTURE0 + working_group.bound_textures);
+            glBindTexture(GL_TEXTURE_2D, working_group.texture_ids[working_group.bound_textures]);
+
+            working_group.bound_textures += 1;
+        }
         
         for uniform_index: 0..shader.uniform_data.count - 1
         {

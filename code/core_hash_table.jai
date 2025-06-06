@@ -24,6 +24,16 @@ c_hash_table_create :: (memory_arena: *Memory_Arena, max_entries: s64) -> C_Hash
     return result;
 }
 
+c_hash_table_create_za :: (zone: *Zone_Allocator, max_entries: s64) -> C_Hash_Table
+{
+    result: C_Hash_Table = ---;
+    result.max_entries    = xx max_entries;
+    result.pairs          = za_alloc_array(zone, C_Hash_Pair_Entry, 512, .STATIC);
+    result.entry_counter  = 0;
+
+    return result;
+}
+
 c_hash_equate_index :: (hash_table: *C_Hash_Table, key: string) -> s64
 {
     hash := 14695981039346656037;
@@ -43,11 +53,14 @@ c_hash_insert_pair :: (table: *C_Hash_Table, key: string, value: *void)
 {
     hash_index := c_hash_equate_index(table, key);
     assert(hash_index >= 0);
-    if compare_strings(table.pairs[hash_index].key, key) == 0
+    if table.pairs[hash_index].key != ""
     {
-        table.pairs[hash_index].value = value;
-        log("Value at index % in the hash has been updated...\n", hash_index);
-        return;
+        if compare_strings(table.pairs[hash_index].key, key) == 0
+        {
+            table.pairs[hash_index].value = value;
+            log("Value at index % in the hash has been updated...\n", hash_index);
+            return;
+        }
     }
 
     table.pairs[hash_index].key    = key;
@@ -59,12 +72,20 @@ c_hash_get_value :: (table: *C_Hash_Table, key: string) -> *void
 {
     hash_index := c_hash_equate_index(table, key);
     assert(hash_index >= 0);
-    if compare_strings(table.pairs.data[hash_index].key, key) == 0
+    if table.pairs[hash_index].key != ""
     {
-        return table.pairs[hash_index].value;
+        if compare_strings(table.pairs.data[hash_index].key, key) == 0
+        {
+            return table.pairs[hash_index].value;
+        }
+        else
+        {
+            return null;
+        }
     }
     else
     {
+        log("[ERROR]: hash table does not contain a valid string at index '%', which key '%' gave...\n", hash_index, key);
         return null;
     }
 }

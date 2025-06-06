@@ -225,3 +225,12 @@ c_arena_reset :: (arena: *Memory_Arena)
     arena.used                 = 0;
     arena.scratch_buffer_count = 0;
 }
+
+c_arena_delte :: (arena: *Memory_Arena)
+{
+    while arena.allocation_block_count > 0
+    {
+        free_last_block(arena);
+    }
+    arena.* = .{};
+}

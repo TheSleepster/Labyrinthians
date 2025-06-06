@@ -36,7 +36,8 @@ am_init :: () -> Asset_Manager
     result.atlas_builder   = ab_init_atlas_builder(result.asset_allocator,
                                                    2048,
                                                    2048,
-                                                  .FORMAT_RGBA);
+                                                  .FORMAT_RGBA,
+                                                   true);
 
     if is_directory("../run_tree/res/textures")
     {
@@ -105,7 +106,7 @@ Bitmap_Format :: enum
 Bitmap :: struct
 {
     data    :  *u8;
-    channels:   u32;
+    channels:   s32;
     format  :   Bitmap_Format;
     
     stride  :   s32;
@@ -125,6 +126,7 @@ asset_init_bitmap :: (zone: *Zone_Allocator, width: s32, height: s32, format: Bi
     result.stride   = xx (1 * xx result.format);
     result.data     = za_alloc(zone, size_of(u8) * (cast(u32)(result.width * result.height) * xx result.format), .STATIC);
     result.is_valid = true;
+    result.channels = xx result.format;
 
     return result;
 }
@@ -151,6 +153,7 @@ Texture2D :: struct
 
     // NOTE(Sleepster): will be null if this texture is not an atlas... 
     atlas_data : *Texture_Atlas_Data;
+    is_in_atlas:  bool;
 };
 
 asset_synchronous_load_texture_data :: inline (asset_slot: *Asset_Slot)
@@ -165,6 +168,11 @@ asset_synchronous_load_texture_data :: inline (asset_slot: *Asset_Slot)
                                     0);
     texture.bitmap.is_valid = true;
     texture.bitmap.is_dirty = true;
+}
+
+asset_load_texture_from_hash :: inline (asset_manager: *Asset_Manager, hash_name: string)
+{
+    asset_get_texture(asset_manager, hash_name);
 }
 
 asset_get_texture :: (asset_manager: *Asset_Manager, hash_name: string) -> *Texture2D
@@ -188,21 +196,19 @@ asset_get_texture :: (asset_manager: *Asset_Manager, hash_name: string) -> *Text
     return result;
 }
 
-// TODO(Sleepster): Hey, is this no-initial idea good? 
+// TODO(Sleepster): Hey, is this no-initialize idea good? 
 asset_create_texture_from_bitmap :: (bitmap     : Bitmap,
                                      has_AA     : bool,
                                      filter_type: Filter_Type,
                                      hash_name  : string = "",
                                      filepath   : string = "") -> Texture2D
 {
-    result: Texture2D = ---;
+    result: Texture2D  = .{};
     result.bitmap      = bitmap;
     result.has_AA      = has_AA;
     result.filter_type = filter_type;
     result.hash_name   = hash_name;
     result.filepath    = filepath;
-    result.texID       = 0;
-    result.atlas_data  = null;
 
     return result;
 }
@@ -233,7 +239,19 @@ asset_get_sprite :: (asset_manager: *Asset_Manager, sprite_name: string, insert_
     if texture_slot
     {
         texture := *texture_slot.texture;
-        ab_add_texture_to_builder_atlas(asset_manager, *asset_manager.atlas_builder, texture, result);
+        if texture.is_in_atlas == false
+        {
+            result = ab_add_texture_to_builder_atlas(asset_manager, *asset_manager.atlas_builder, texture);
+        }
+        else
+        {
+            assert(asset_manager.atlas_builder.store_keys == true);
+
+            sprite := c_hash_get_value(*asset_manager.atlas_builder.atlas_texture.atlas_data.sprite_hash, sprite_name);
+            assert(sprite != null);
+
+            result = sprite;
+        }
     }
     else
     {

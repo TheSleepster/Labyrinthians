@@ -17,11 +17,14 @@ API DEFINITIONS:
 
 za_init                :: (block_size) -> *Zone_Allocator;
 za_alloc               :: (zone: *Zone_Allocator, size_init: u64, tag: Allocation_Tag) -> *void;
+
 za_free                :: (zone: *Zone_Allocator, pointer: *void);
 za_free_zone_tag       :: (zone: *Zone_Allocator, tag: Allocation_Tag);
 za_free_zone_tag_range :: (zone: *Zone_Allocator, low_tag: Allocation_Tag, high_tag: Allocation_Tag);
 za_deinit              :: (zone: **Zone_Allocator);
 
+za_alloc_struct        :: inline (zone: *Zone_Allocator, $T: Type, tag_type: Allocation_Tag) -> *T
+za_alloc_array         :: inline (zone: *Zone_Allocator, $T: Type, count: s32, tag_type: Allocation_Tag) -> []T
 DEBUG:
 
 za_print_block_list    :: (zone: *Zone_Allocator);
@@ -196,6 +199,21 @@ za_alloc :: (zone: *Zone_Allocator, size_init: u64, tag: Allocation_Tag) -> *voi
 
     log("[INFO]: Zone Allocated: '%' bytes...\n", size);
     return(cast(*u8)base_block + size_of(Zone_Memory_Block));
+}
+
+za_alloc_struct :: inline (zone: *Zone_Allocator, $T: Type, tag_type: Allocation_Tag) -> *T
+{
+    result := za_alloc(zone, size_of(T), tag_type);
+    return result;
+}
+
+za_alloc_array :: inline (zone: *Zone_Allocator, $T: Type, count: u64, tag_type: Allocation_Tag) -> []T
+{
+    result: []T;
+    result.data  = za_alloc(zone, size_of(T) * count, tag_type);
+    result.count = xx count;
+
+    return result;
 }
 
 za_free :: (zone: *Zone_Allocator, pointer: **void)

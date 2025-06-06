@@ -42,32 +42,6 @@ L_labyrinthian_main :: ()
         input_manager: Input_Manager;
         render_state  := r_init_renderer_data(window);
 
-        zone_allocator := za_init(MB(500));
-        za_print_block_list(zone_allocator);
-        za_validate_block_list(zone_allocator);
-
-        memory  := za_alloc(zone_allocator, MB(330), .CACHED);
-        za_print_block_list(zone_allocator);
-        za_validate_block_list(zone_allocator);
-
-        memory2 := za_alloc(zone_allocator, MB(120),  .CACHED);
-        za_print_block_list(zone_allocator);
-        za_validate_block_list(zone_allocator);
-
-        memory3 := za_alloc(zone_allocator, MB(300),  .STATIC);
-        za_print_block_list(zone_allocator);
-        za_validate_block_list(zone_allocator);
-
-        memory4 := za_alloc(zone_allocator, MB(180),  .STATIC);
-        za_print_block_list(zone_allocator);
-        za_validate_block_list(zone_allocator);
-
-        za_free(zone_allocator, *memory4);
-        za_print_block_list(zone_allocator);
-        za_validate_block_list(zone_allocator);
-
-        za_deinit(*zone_allocator);
-
         is_running := true;
         while is_running
         {
