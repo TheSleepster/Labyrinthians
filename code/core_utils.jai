@@ -286,6 +286,17 @@ mat4_make_translation :: (translation: Vector3) -> Matrix4
     return result;
 }
 
+mat4_get_position_vector :: (matrix: Matrix4) -> Vector4
+{
+    result: Vector4;
+    result.x = matrix._41;
+    result.y = matrix._42;
+    result.z = matrix._43;
+    result.w = matrix._44;
+
+    return result;
+}
+
 mat4_translate :: (matrix: Matrix4, translation: Vector3) -> Matrix4
 {
     return multiply(matrix, mat4_make_translation(translation));
@@ -394,7 +405,7 @@ get_random_normal :: () -> float64
 
 get_random_normal_range :: (min: float32, max: float32) -> float32
 {
-    mean := min + 0.5 * (min + max); 
+    mean  := min + 0.5 * (min + max); 
     sigma := (max - min) / 4.0;
     
     z := get_random_normal();  

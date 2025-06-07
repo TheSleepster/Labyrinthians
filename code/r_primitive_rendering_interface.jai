@@ -187,7 +187,7 @@ r_create_draw_quad :: (render_state  : *Render_State,
     return quad;
 }
 
-// NOTE(Sleepster): Pass Radians to this function
+// NOTE(Sleepster): Pass Radians to these functions
 r_draw_quad :: (render_state  : *Render_State,
                 position      :  Vector2,
                 render_size   :  Vector2,

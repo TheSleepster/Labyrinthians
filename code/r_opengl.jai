@@ -1,11 +1,11 @@
 /*
 TODO(Sleepster):
-- [ ] Rendering Options
+- [x] Rendering Options
+- [x] Texturing
 - [ ] Rendering Lines  
 - [ ] Allow the renderer to support Point Lights
-- [ ] Texturing
 - [ ] Functions like 'draw_quad_xform()' that would allow XForm placement
-- [ ] Resize matrices when the window changes
+- [ ] Resize matrices when the window changes size
 */
 
 MAX_GROUP_VERTICES :: 10000;
@@ -720,14 +720,6 @@ r_render_group_test_render :: (render_state: *Render_State, asset_manager: *Asse
 
         shader := *working_group.bound_shader;
         glUseProgram(shader.program_id);
-
-        // for tex_index: 0..working_group.group_texture_count - 1
-        // {
-        //     glActiveTexture(GL_TEXTURE0 + working_group.bound_textures);
-        //     glBindTexture(GL_TEXTURE_2D, working_group.texture_ids[working_group.bound_textures]);
-
-        //     working_group.bound_textures += 1;
-        // }
         
         for uniform_index: 0..shader.uniform_data.count - 1
         {
@@ -804,22 +796,3 @@ r_reset_draw_frame :: inline (render_state: *Render_State)
     c_arena_reset(*render_state.draw_frame_arena);
     render_state.draw_frame = .{};
 }
-
-// typedef struct draw_frame_t
-// {
-//     render_quad *QuadBuffer;
-//     uint32 QuadCounter;
-
-//     vertex *VertexBuffer;
-//     vertex *VertexBufferptr;
-    
-//     uint32  VertexCount;
-
-//     uint32  ActiveShaderProgram;
-
-//     uint32  TexturesToBind[32];
-//     uint32  UsedTextureSlots;
-
-//     mat4    ActiveViewMatrix;
-//     mat4    ActiveProjectionMatrix;
-// }draw_frame;
