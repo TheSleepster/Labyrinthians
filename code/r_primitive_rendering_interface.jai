@@ -61,12 +61,15 @@ Render_Quad :: struct
     };
 };
 
-r_create_draw_quad :: (render_state: *Render_State,
-                       position    :  Vector2,
-                       render_size :  Vector2,
-                       draw_color  :  Vector4,
-                       texture_id  :  u32,
-                       rotation    :  float32) -> Render_Quad
+r_create_draw_quad :: (render_state  : *Render_State,
+                       position      :  Vector2,
+                       render_size   :  Vector2,
+                       draw_color    :  Vector4,
+                       texture_id    :  u32,
+                       rotation      :  float32,
+                       render_options:  u32,
+                       atlas_offset  :  Vector2,
+                       sprite_size   :  Vector2) -> Render_Quad
 {
     quad: Render_Quad;
     quad.world_position = position;
@@ -104,10 +107,20 @@ r_create_draw_quad :: (render_state: *Render_State,
     quad.required_texture_id     = texture_id;
     if texture_id != U32_MAX
     {
-        quad.top_left.vTexelData     = .{0, 0};
-        quad.top_right.vTexelData    = .{1, 0};
-        quad.bottom_left.vTexelData  = .{0, 1};
-        quad.bottom_right.vTexelData = .{1, 1};
+        if !(render_options & xx Rendering_Options.RO_TEXEL_FETCHED)
+        {
+            quad.top_left.vTexelData     = .{0, 0};
+            quad.top_right.vTexelData    = .{1, 0};
+            quad.bottom_left.vTexelData  = .{0, 1};
+            quad.bottom_right.vTexelData = .{1, 1};
+        }
+        else
+        {
+            quad.top_left.vTexelData     = .{atlas_offset.x,                 atlas_offset.y};
+            quad.bottom_left.vTexelData  = .{atlas_offset.x,                 atlas_offset.y + sprite_size.y};
+            quad.bottom_right.vTexelData = .{atlas_offset.x + sprite_size.x, atlas_offset.y + sprite_size.y};
+            quad.top_right.vTexelData    = .{atlas_offset.x + sprite_size.x, atlas_offset.y};
+        }
     }
 
     if rotation != 0
@@ -161,21 +174,48 @@ r_create_draw_quad :: (render_state: *Render_State,
 
     for *element: quad.elements
     {
-        element.vColor = draw_color;
+        element.vColor         = draw_color;
+        element.vRenderOptions = render_options;
     }
 
     return quad;
 }
 
 // NOTE(Sleepster): Pass Radians to this function
-r_draw_quad :: (render_state: *Render_State,
-                position    :  Vector2,
-                render_size :  Vector2,
-                draw_color  :  Vector4,
-                texture_id  :  u32     = U32_MAX,
-                rotation    :  float32 = 0.0)
+r_draw_quad :: (render_state  : *Render_State,
+                position      :  Vector2,
+                render_size   :  Vector2,
+                draw_color    :  Vector4,
+                texture_id    :  u32               = U32_MAX,
+                render_options:  Rendering_Options = .RO_NONE, 
+                rotation      :  float32           = 0.0)
 {
-    render_quad    := r_create_draw_quad(render_state, position, render_size, draw_color, texture_id, rotation);
+    assert(!(render_options & .RO_TEXEL_FETCHED));
+    render_quad    := r_create_draw_quad(render_state, position, render_size, draw_color, texture_id, rotation, xx render_options, (Vector2).{}, (Vector2).{});
+    current_buffer := r_get_render_group_quad_buffer(render_state);
+
+    current_buffer.quad_buffer[current_buffer.quad_count] = render_quad;
+    current_buffer.quad_count += 1;
+}
+
+r_draw_sprite :: (render_state   : *Render_State,
+                  position       : Vector2,
+                  render_size    : Vector2,
+                  draw_color     : Vector4,
+                  atlas_sprite   : *Static_Sprite2D,
+                  rotation       : float32           = 0.0,
+                  render_options : Rendering_Options = .RO_NONE)
+{
+    render_options |= .RO_TEXEL_FETCHED;
+    render_quad := r_create_draw_quad(render_state,
+                                      position,
+                                      render_size,
+                                      draw_color,
+                                      atlas_sprite.atlas_texture.texID,
+                                      rotation,
+                                   xx render_options,
+                                      v2_cast(atlas_sprite.atlas_offset),
+                                      v2_cast(atlas_sprite.atlas_size));
     current_buffer := r_get_render_group_quad_buffer(render_state);
 
     current_buffer.quad_buffer[current_buffer.quad_count] = render_quad;

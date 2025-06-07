@@ -34,8 +34,8 @@ am_init :: () -> Asset_Manager
     result.hash_data_arena = c_arena_init(MB(100));
     result.texture_hash    = c_hash_table_create(*result.hash_data_arena, 512); 
     result.atlas_builder   = ab_init_atlas_builder(result.asset_allocator,
-                                                   2048,
-                                                   2048,
+                                                   ENGINE_TEXTURE_SIZE,
+                                                   ENGINE_TEXTURE_SIZE,
                                                   .FORMAT_RGBA,
                                                    true);
 

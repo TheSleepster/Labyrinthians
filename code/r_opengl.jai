@@ -13,15 +13,23 @@ MAX_QUADS          :: MAX_GROUP_VERTICES / 4;
 MAX_QUAD_INDICES   :: MAX_QUADS * 6;
 MAX_LINES          :: MAX_GROUP_VERTICES / 2;
 MAX_TRIANGLES      :: #run {cast(s64)(floor(MAX_GROUP_VERTICES / 3));}
-MAX_TEXTURE_SLOTS  :: 16;
+MAX_TEXTURE_SLOTS   :: 16;
+MAX_RENDER_PASSES   :: 32;
+ENGINE_TEXTURE_SIZE :: 2048;
 
-MAX_RENDER_PASSES  :: 32;
+Rendering_Options :: enum u32
+{
+    RO_NONE          :: 0x00;
+    RO_TEXEL_FETCHED :: 0x01;
+    RO_UNLIT         :: 0x02;
+};
 
 Vertex :: struct
 {
-    vPosition : Vector4;
-    vColor    : Vector4;
-    vTexelData: Vector2;
+    vPosition     : Vector4;
+    vColor        : Vector4;
+    vTexelData    : Vector2;
+    vRenderOptions: u32;
 };
 
 Render_Material :: struct
@@ -628,10 +636,13 @@ r_init_renderer_data :: (window: *SDL_Window) -> Render_State
             glVertexAttribPointer(0, 4, GL_FLOAT, GL_FALSE, size_of(Vertex), xx *offset.vPosition);
             glVertexAttribPointer(1, 4, GL_FLOAT, GL_FALSE, size_of(Vertex), xx *offset.vColor);
             glVertexAttribPointer(2, 2, GL_FLOAT, GL_FALSE, size_of(Vertex), xx *offset.vTexelData);
+
+            glVertexAttribIPointer(3, 1, GL_UNSIGNED_INT, size_of(Vertex), xx *offset.vRenderOptions);
             
             glEnableVertexAttribArray(0);
             glEnableVertexAttribArray(1);
             glEnableVertexAttribArray(2);
+            glEnableVertexAttribArray(3);
 
             glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, 0);
         }
@@ -647,7 +658,7 @@ uploaded: bool = false;
 
 r_test_render :: (render_state: *Render_State, asset_manager: *Asset_Manager)
 {
-    r_draw_quad(render_state, .{  10,   10}, .{100, 100}, .{1, 0, 0, 1}, U32_MAX, deg_to_rad(140));
+    r_draw_quad(render_state, .{  10,   10}, .{100, 100}, .{1, 0, 0, 1}, U32_MAX, .RO_NONE, deg_to_rad(140));
     r_draw_quad(render_state, .{-100, -100}, .{100, 100}, .{0, 1, 0, 1});
     r_draw_quad(render_state, .{ 100,    0}, .{100, 100}, .{0, 0, 1, 1});
     texture := asset_get_texture(asset_manager, "player");
@@ -730,13 +741,12 @@ r_render_group_test_render :: (render_state: *Render_State, asset_manager: *Asse
                                                                                       1080 *  0.5,
                                                                                      -1.0,
                                                                                       1.0);
-    r_draw_quad(render_state, .{  10,   10}, .{100, 100}, .{1, 0, 0, 1}, U32_MAX, deg_to_rad(140));
+    r_draw_quad(render_state, .{  10,   10}, .{100, 100}, .{1, 0, 0, 1}, U32_MAX, .RO_NONE, deg_to_rad(140));
     r_draw_quad(render_state, .{-100, -100}, .{100, 100}, .{0, 1, 0, 1});
     r_draw_quad(render_state, .{ 100,    0}, .{100, 100}, .{0, 0, 1, 1});
     r_draw_quad(render_state, .{ 100,  150}, .{100, 100}, .{1, 0, 1, 1});
 
     
-    sprite2 := asset_get_sprite(asset_manager, "null_sprite");
     sprite  := asset_get_sprite(asset_manager, "player");
     texture := asset_get_texture(asset_manager, "player");
     if !uploaded_debug_texture
@@ -750,10 +760,10 @@ r_render_group_test_render :: (render_state: *Render_State, asset_manager: *Asse
             }
         }
     }
-    r_draw_quad(render_state, .{ 200,  150}, .{100, 100}, .{0, 1, 0, 1}, texture.texID, 0);
-    r_draw_quad(render_state, .{ 200, -150}, .{100, 100}, .{0, 0, 1, 1}, texture.texID, 0);
-    r_draw_quad(render_state, .{-200, -150}, .{100, 100}, .{1, 1, 1, 1}, texture.texID, deg_to_rad(33));
-    r_draw_quad(render_state, .{-200,  150}, .{100, 100}, .{1, 0, 0, 1}, sprite.atlas_texture.texID, 0);
+    r_draw_quad(render_state,   .{ 200,  150}, .{100, 100}, .{0, 1, 0, 1}, texture.texID, 0);
+    r_draw_quad(render_state,   .{ 200, -150}, .{100, 100}, .{0, 0, 1, 1}, texture.texID, 0);
+    r_draw_quad(render_state,   .{-200, -150}, .{100, 100}, .{1, 1, 1, 1}, texture.texID, .RO_NONE, deg_to_rad(33));
+    r_draw_sprite(render_state, .{-200,  150}, .{100, 100}, .{1, 1, 1, 1}, sprite, deg_to_rad(140));
     
     glViewport(0, 0, 1920, 1080);
     glClearColor(0.0, 0.0, 0.0, 1.0);
@@ -784,13 +794,13 @@ r_render_group_test_render :: (render_state: *Render_State, asset_manager: *Asse
         shader := *working_group.bound_shader;
         glUseProgram(shader.program_id);
 
-        for tex_index: 0..working_group.group_texture_count - 1
-        {
-            glActiveTexture(GL_TEXTURE0 + working_group.bound_textures);
-            glBindTexture(GL_TEXTURE_2D, working_group.texture_ids[working_group.bound_textures]);
+        // for tex_index: 0..working_group.group_texture_count - 1
+        // {
+        //     glActiveTexture(GL_TEXTURE0 + working_group.bound_textures);
+        //     glBindTexture(GL_TEXTURE_2D, working_group.texture_ids[working_group.bound_textures]);
 
-            working_group.bound_textures += 1;
-        }
+        //     working_group.bound_textures += 1;
+        // }
         
         for uniform_index: 0..shader.uniform_data.count - 1
         {
