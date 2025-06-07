@@ -57,8 +57,8 @@ Render_Group :: struct
     stored_render_layer:  u32;
     view_matrix        :  Matrix4;
     projection_matrix  :  Matrix4;
-    material           :  Render_Material;
-    bound_shader       :  GPU_Shader;
+    material           : *Render_Material;
+    bound_shader       : *GPU_Shader;
 };
 
 r_get_render_group_quad_buffer :: (render_state: *Render_State) -> *Render_Group_Quad_Buffer

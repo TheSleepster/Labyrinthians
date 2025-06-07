@@ -92,6 +92,7 @@ GPU_Shader :: struct
 {
     program_id     :   u32;
     shader_source  :   string;
+    hash_name      :   string;
     shader_type    :   GPU_Shader_Type;
 
     update_buffer  : (shader: *GPU_Shader, buffer_name : string, size: s64, data: *void);
@@ -115,7 +116,7 @@ Draw_Frame :: struct
     pass_count                :   u32;
 
     bound_texture_counter     :   u32; 
-    active_shader             :   GPU_Shader;
+    active_shader             :  *GPU_Shader;
     
     // NOTE(Sleepster): Linked Lists 
     quad_buffers              :   Render_Group_Quad_Buffer;
@@ -660,7 +661,7 @@ r_init_renderer_data :: (window: *SDL_Window) -> Render_State
 #no_reset uploaded_debug_texture: bool = false;
 r_render_group_test_render :: (render_state: *Render_State, asset_manager: *Asset_Manager)
 {
-    render_state.draw_frame.active_shader            = render_state.test_shader;
+    render_state.draw_frame.active_shader            = asset_get_shader(asset_manager, "Basic_Shader");
     render_state.draw_frame.active_view_matrix       = mat4_identity();
     render_state.draw_frame.active_projection_matrix = orthographic_projection_matrix(1920 * -0.5,
                                                                                       1920 *  0.5,
@@ -703,10 +704,10 @@ r_render_group_test_render :: (render_state: *Render_State, asset_manager: *Asse
     for group_index: 0..render_state.draw_frame.render_group_counter - 1
     {
         working_group := render_state.draw_frame.render_groups[group_index];
-        working_group.bound_shader.update_uniform(*working_group.bound_shader,
+        working_group.bound_shader.update_uniform(working_group.bound_shader,
                                                   "ProjectionMatrix",
                                                   *working_group.projection_matrix._11);
-        working_group.bound_shader.update_uniform(*working_group.bound_shader,
+        working_group.bound_shader.update_uniform(working_group.bound_shader,
                                                   "ViewMatrix",
                                                   *working_group.view_matrix._11);
         
@@ -718,7 +719,7 @@ r_render_group_test_render :: (render_state: *Render_State, asset_manager: *Asse
 
         glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, render_state.primary_ebo_id);
 
-        shader := *working_group.bound_shader;
+        shader := working_group.bound_shader;
         glUseProgram(shader.program_id);
         
         for uniform_index: 0..shader.uniform_data.count - 1

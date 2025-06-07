@@ -14,15 +14,15 @@ Atlas_Builder :: struct
     atlas_height       :  s32;
 
     textures_to_add    : [64]*Texture2D;
-    texture_counter    : s32;
+    texture_counter    :  s32;
 
     atlas_texture      :  Texture2D;
     atlas_bitmap       : *Bitmap;
     atlas_bitmap_format:  Bitmap_Format;
 
-    bitmap_cursor_x    : s32;
-    bitmap_cursor_y    : s32;
-    bitmap_tallest_y   : s32;
+    bitmap_cursor_x    :  s32;
+    bitmap_cursor_y    :  s32;
+    bitmap_tallest_y   :  s32;
 };
 
 ab_init_atlas_builder :: (zone         : *Zone_Allocator,
@@ -181,7 +181,7 @@ ab_reset_builder :: (asset_manager       : *Asset_Manager,
         if !asset_slot
         {
             new_slot := c_arena_push_struct(*asset_manager.hash_data_arena, Asset_Slot);
-            new_slot.texture = atlas_builder.atlas_texture;
+            new_slot.texture_data = atlas_builder.atlas_texture;
 
             c_hash_insert_pair(*asset_manager.texture_hash, hash_name, new_slot);
         }

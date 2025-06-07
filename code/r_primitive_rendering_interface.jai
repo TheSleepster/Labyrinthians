@@ -13,8 +13,8 @@ Render_Primitive_Data :: struct
     required_texture_id: u32;
     render_texture_idx : u32;
 
-    required_shader    : GPU_Shader;
-    required_material  : Render_Material;
+    required_shader    : *GPU_Shader;
+    required_material  : *Render_Material;
 };
 
 Render_Line :: struct
@@ -91,9 +91,9 @@ r_create_draw_quad :: (render_state  : *Render_State,
 
         render_state.draw_frame.pass_count += 1;
     }
-    quad.render_pass_id     = render_state.draw_frame.pass_count - 1;
-    quad.required_shader    = render_state.draw_frame.active_shader;
-    quad.required_shader_id = quad.required_shader.program_id;
+    quad.render_pass_id     =  render_state.draw_frame.pass_count - 1;
+    quad.required_shader    =  render_state.draw_frame.active_shader;
+    quad.required_shader_id =  quad.required_shader.program_id;
 
     top    := position.y;
     bottom := position.y + render_size.y;

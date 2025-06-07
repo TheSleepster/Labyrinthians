@@ -10,8 +10,9 @@ Asset_Slot :: struct
     slot_state: Asset_Slot_State;
     union
     {
-        texture    : Texture2D;
-        sprite_data: Static_Sprite2D;
+        texture_data: Texture2D;
+        sprite_data : Static_Sprite2D;
+        shader_data : GPU_Shader;
     };
 };
 
@@ -19,10 +20,12 @@ Asset_Manager :: struct
 {
     asset_allocator: *Zone_Allocator;
     hash_data_arena:  Memory_Arena;
+    shader_arena   :  Memory_Arena;
+    
     atlas_builder  :  Atlas_Builder;
 
     texture_hash   :  C_Hash_Table; 
-    sprite_hash    :  C_Hash_Table;
+    shader_hash    :  C_Hash_Table;
 };
 
 am_init :: () -> Asset_Manager
@@ -32,7 +35,9 @@ am_init :: () -> Asset_Manager
     result: Asset_Manager;
     result.asset_allocator = za_init(GB(1));
     result.hash_data_arena = c_arena_init(MB(100));
+    result.shader_arena    = c_arena_init(MB(100));
     result.texture_hash    = c_hash_table_create(*result.hash_data_arena, 512); 
+    result.shader_hash     = c_hash_table_create(*result.hash_data_arena, 256);
     result.atlas_builder   = ab_init_atlas_builder(result.asset_allocator,
                                                    ENGINE_TEXTURE_SIZE,
                                                    ENGINE_TEXTURE_SIZE,
@@ -66,6 +71,8 @@ am_init :: () -> Asset_Manager
 
     }
 
+    asset_add_shader_to_hash(*result, BASIC_SHADER_SOURCE_TEXT, "Basic_Shader", .PIXEL);
+
     return result;
 }
 
@@ -78,7 +85,7 @@ am_prepare_texture_metadata :: (info: *File_Visit_Info, user_data: *void)
         asset_slot := c_arena_push_struct(*asset_manager.hash_data_arena, Asset_Slot);
         asset_slot.slot_state = .UNLOADED;
 
-        texture_data := *asset_slot.texture;
+        texture_data := *asset_slot.texture_data;
         texture_data.filepath  = copy_string(info.full_name);
         texture_data.hash_name = copy_string(basename);
 
@@ -92,6 +99,7 @@ am_prepare_texture_metadata :: (info: *File_Visit_Info, user_data: *void)
 ///////////////
 // BITMAPS 
 ///////////////
+
 Bitmap_Format :: enum
 {
     // NOTE(Sleepster): these are the channel count     
@@ -134,6 +142,7 @@ asset_init_bitmap :: (zone: *Zone_Allocator, width: s32, height: s32, format: Bi
 ////////////////
 // TEXTURES
 ////////////////
+
 Filter_Type :: enum
 {
     NEAREST;
@@ -160,7 +169,7 @@ asset_synchronous_load_texture_data :: inline (asset_slot: *Asset_Slot)
 {
     asset_slot.slot_state = .LOADED;
     
-    texture     := *asset_slot.texture;
+    texture     := *asset_slot.texture_data;
     texture.bitmap.data = stbi_load(temp_c_string(texture.filepath),
                                    *texture.bitmap.width,
                                    *texture.bitmap.height,
@@ -182,11 +191,11 @@ asset_get_texture :: (asset_manager: *Asset_Manager, hash_name: string) -> *Text
     asset_slot := cast(*Asset_Slot)c_hash_get_value(*asset_manager.texture_hash, hash_name);
     if asset_slot
     {
-        if !asset_slot.texture.bitmap.data
+        if !asset_slot.texture_data.bitmap.data
         {
             asset_synchronous_load_texture_data(asset_slot);
         }
-        result = *asset_slot.texture;
+        result = *asset_slot.texture_data;
     }
     else
     {
@@ -216,7 +225,7 @@ asset_create_texture_from_bitmap :: (bitmap     : Bitmap,
 //////////////////
 // ATLAS SPRITES
 //////////////////
-
+ 
 // NOTE(Sleepster): A sprite is functionally identical to that of a
 // texture, the only difference is that a sprite has been inserted into
 // an atlas while textures are simply individual.
@@ -238,7 +247,7 @@ asset_get_sprite :: (asset_manager: *Asset_Manager, sprite_name: string, insert_
     texture_slot := cast(*Asset_Slot)c_hash_get_value(*asset_manager.texture_hash, sprite_name);
     if texture_slot
     {
-        texture := *texture_slot.texture;
+        texture := *texture_slot.texture_data;
         if texture.is_in_atlas == false
         {
             result = ab_add_texture_to_builder_atlas(asset_manager, *asset_manager.atlas_builder, texture);
@@ -259,5 +268,43 @@ asset_get_sprite :: (asset_manager: *Asset_Manager, sprite_name: string, insert_
         assert(false);
     }
     
+    return result;
+}
+
+////////////
+// SHADERS
+////////////
+
+asset_add_shader_to_hash :: (asset_manager: *Asset_Manager, shader_source_string: string, hash_name: string, type: GPU_Shader_Type)
+{
+    asset_slot  := c_arena_push_struct(*asset_manager.hash_data_arena, Asset_Slot);
+    shader_data := *asset_slot.shader_data;
+
+    shader_data.shader_type   = type;
+    shader_data.hash_name     = hash_name;
+    shader_data.shader_source = shader_source_string;    
+
+    c_hash_insert_pair(*asset_manager.shader_hash, hash_name, asset_slot);
+}
+
+asset_get_shader :: (asset_manager: *Asset_Manager, shader_name: string) -> *GPU_Shader
+{
+    result: *GPU_Shader;
+    
+    asset_slot := cast(*Asset_Slot)c_hash_get_value(*asset_manager.shader_hash, shader_name);
+    if asset_slot != null
+    {
+        shader := *asset_slot.shader_data;
+        if shader.program_id == 0
+        {
+            shader.* = compile_shader_source(*asset_manager.shader_arena, *shader.shader_source, shader.shader_type);
+        }
+        result = shader;
+    }
+    else
+    {
+        log("[ERROR]: Shader by the name of '%' was not found...\n", shader_name);
+    }
+
     return result;
 }

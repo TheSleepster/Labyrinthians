@@ -59,7 +59,7 @@ c_arena_init :: (minimum_block_size: u64, is_growing_allocator: bool = true) -> 
     return result;
 }
 
-c_arena_init_from_base :: (base: *void, capacity: u64, is_growing_allocator: bool = true) -> Memory_Arena
+c_arena_init_from_base :: (base: *void, capacity: u64, is_growing_allocator: bool = false) -> Memory_Arena
 {
     result: Memory_Arena;
     result.base                 = cast(*u8)base;
@@ -226,7 +226,7 @@ c_arena_reset :: (arena: *Memory_Arena)
     arena.scratch_buffer_count = 0;
 }
 
-c_arena_delte :: (arena: *Memory_Arena)
+c_arena_delete :: (arena: *Memory_Arena)
 {
     while arena.allocation_block_count > 0
     {
