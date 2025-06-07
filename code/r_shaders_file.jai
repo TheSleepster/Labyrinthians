@@ -8,6 +8,7 @@ layout(location = 0) in vec4 vPosition;
 layout(location = 1) in vec4 vColor;
 layout(location = 2) in vec2 vTexelData;
 layout(location = 3) in uint vRenderingOptions;
+layout(location = 4) in uint vTextureIndex;
 
 uniform mat4 ProjectionMatrix;
 uniform mat4 ViewMatrix;
@@ -15,6 +16,7 @@ uniform mat4 ViewMatrix;
      out vec4 vOutColor; 
      out vec2 vOutTexelData;
 flat out uint vOutRenderingOptions;
+flat out uint vOutTexIndex;
 
 void
 main()
@@ -22,6 +24,7 @@ main()
     vOutColor            = vColor;
     vOutTexelData        = vTexelData;
     vOutRenderingOptions = vRenderingOptions;
+    vOutTexIndex         = vTextureIndex;
 
     gl_Position          = ProjectionMatrix * ViewMatrix * vPosition;
 }
@@ -31,27 +34,35 @@ main()
 layout(location = 0)      in vec4 vOutColor;
 layout(location = 1)      in vec2 vOutTexelData;
 layout(location = 2) flat in uint vOutRenderingOptions;
+layout(location = 3) flat in uint vOutTexIndex;
 
 out vec4 vFragColor;
 
-layout(binding = 0) uniform sampler2D TestTexture;
+uniform sampler2D AtlasArray[16];
 
 void
 main()
 {
     vec4 TextureColor;
-    if((vOutRenderingOptions & RO_TEXEL_FETCHED) != 0)
+    if(vOutTexIndex > 0)
     {
-        TextureColor = texelFetch(TestTexture, ivec2(vOutTexelData), 0);
+        if((vOutRenderingOptions & RO_TEXEL_FETCHED) != 0)
+        {
+            TextureColor = texelFetch(AtlasArray[vOutTexIndex], ivec2(vOutTexelData), 0);
+        }
+        else
+        {
+            TextureColor = texture(AtlasArray[vOutTexIndex], vOutTexelData);
+        }
+        
+        if(TextureColor.a == 0.0)
+        {
+            discard;
+        }
     }
     else
     {
-        TextureColor = texture(TestTexture, vOutTexelData);
-    }
-    
-    if(TextureColor.a == 0.0)
-    {
-        discard;
+        TextureColor = vOutColor;
     }
     vFragColor = TextureColor * vOutColor;
 }

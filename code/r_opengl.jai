@@ -30,6 +30,7 @@ Vertex :: struct
     vColor        : Vector4;
     vTexelData    : Vector2;
     vRenderOptions: u32;
+    vTextureIndex : u32;
 };
 
 Render_Material :: struct
@@ -638,11 +639,13 @@ r_init_renderer_data :: (window: *SDL_Window) -> Render_State
             glVertexAttribPointer(2, 2, GL_FLOAT, GL_FALSE, size_of(Vertex), xx *offset.vTexelData);
 
             glVertexAttribIPointer(3, 1, GL_UNSIGNED_INT, size_of(Vertex), xx *offset.vRenderOptions);
+            glVertexAttribIPointer(4, 1, GL_UNSIGNED_INT, size_of(Vertex), xx *offset.vTextureIndex);
             
             glEnableVertexAttribArray(0);
             glEnableVertexAttribArray(1);
             glEnableVertexAttribArray(2);
             glEnableVertexAttribArray(3);
+            glEnableVertexAttribArray(4);
 
             glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, 0);
         }
@@ -654,83 +657,7 @@ r_init_renderer_data :: (window: *SDL_Window) -> Render_State
     return render_state;
 }
 
-uploaded: bool = false;
-
-r_test_render :: (render_state: *Render_State, asset_manager: *Asset_Manager)
-{
-    r_draw_quad(render_state, .{  10,   10}, .{100, 100}, .{1, 0, 0, 1}, U32_MAX, .RO_NONE, deg_to_rad(140));
-    r_draw_quad(render_state, .{-100, -100}, .{100, 100}, .{0, 1, 0, 1});
-    r_draw_quad(render_state, .{ 100,    0}, .{100, 100}, .{0, 0, 1, 1});
-    texture := asset_get_texture(asset_manager, "player");
-    if !uploaded
-    {
-        uploaded := r_upload_texture_to_gpu(texture);
-        if !uploaded
-        {
-            log("[ERROR]: Failure to upload the texture to the GPU...\n"); 
-        }
-    }
-    r_draw_quad(render_state, .{ 100,    -100}, .{100, 100}, .{0, 0, 1, 1}, texture.texID, 90);
-        
-
-    current_quad_buffer := *render_state.draw_frame.quad_buffers;
-    if current_quad_buffer.quad_count > 0
-    {
-        for quad_index: 0..current_quad_buffer.quad_count - 1
-        {
-            quad := *current_quad_buffer.quad_buffer[quad_index];
-
-            vertex_buffer_ptr := *current_quad_buffer.vertex_buffer[current_quad_buffer.vertex_count];
-
-            top_left    : *Vertex = vertex_buffer_ptr + 0;
-            bottom_left : *Vertex = vertex_buffer_ptr + 1;
-            bottom_right: *Vertex = vertex_buffer_ptr + 2;
-            top_right   : *Vertex = vertex_buffer_ptr + 3;
-            current_quad_buffer.vertex_count += 4;
-
-            top_left.*     = quad.top_left;
-            top_right.*    = quad.top_right;
-            bottom_left.*  = quad.bottom_left;
-            bottom_right.* = quad.bottom_right;
-        }
-    }
-
-    world_view       := Matrix4_Identity;
-    world_projection := orthographic_projection_matrix(1920 * -0.5,
-                                                       1920 *  0.5,
-                                                       1080 * -0.5,
-                                                       1080 *  0.5,
-                                                      -1.0,
-                                                       1.0);
-    
-    glClearColor(0.0, 0.0, 0.0, 1.0);
-    glClearDepth(0.0);
-    glClear(GL_COLOR_BUFFER_BIT|GL_DEPTH_BUFFER_BIT);
-    glViewport(0, 0, 1920, 1080);
-
-    glBindVertexArray(render_state.primary_vao_id);
-    glBindBuffer(GL_ARRAY_BUFFER, render_state.primary_vbo_id);
-    glBufferSubData(GL_ARRAY_BUFFER,
-                    0,
-                    render_state.draw_frame.quad_buffers.vertex_count * size_of(Vertex),
-                    render_state.draw_frame.quad_buffers.vertex_buffer.data);
-
-    glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, render_state.primary_ebo_id);
-    
-    render_state.draw_frame.active_shader.program_id = render_state.test_shader.program_id;
-    glUseProgram(render_state.draw_frame.active_shader.program_id);
-
-    glUniformMatrix4fv(render_state.test_shader_projection_matrix, 1, GL_FALSE, *world_projection._11);
-    glUniformMatrix4fv(render_state.test_shader_view_matrix, 1, GL_FALSE, *world_view._11);
-
-    glDrawElements(GL_TRIANGLES,
-                   render_state.draw_frame.quad_buffers.quad_count * 6,
-                   GL_UNSIGNED_INT,
-                   null);
-}
-
 #no_reset uploaded_debug_texture: bool = false;
-
 r_render_group_test_render :: (render_state: *Render_State, asset_manager: *Asset_Manager)
 {
     render_state.draw_frame.active_shader            = render_state.test_shader;
@@ -760,10 +687,10 @@ r_render_group_test_render :: (render_state: *Render_State, asset_manager: *Asse
             }
         }
     }
+    r_draw_sprite(render_state, .{-200,  150}, .{100, 100}, .{1, 1, 1, 1}, sprite, deg_to_rad(140));
     r_draw_quad(render_state,   .{ 200,  150}, .{100, 100}, .{0, 1, 0, 1}, texture.texID, 0);
     r_draw_quad(render_state,   .{ 200, -150}, .{100, 100}, .{0, 0, 1, 1}, texture.texID, 0);
     r_draw_quad(render_state,   .{-200, -150}, .{100, 100}, .{1, 1, 1, 1}, texture.texID, .RO_NONE, deg_to_rad(33));
-    r_draw_sprite(render_state, .{-200,  150}, .{100, 100}, .{1, 1, 1, 1}, sprite, deg_to_rad(140));
     
     glViewport(0, 0, 1920, 1080);
     glClearColor(0.0, 0.0, 0.0, 1.0);
@@ -818,16 +745,33 @@ r_render_group_test_render :: (render_state: *Render_State, asset_manager: *Asse
                 {
                     if uniform.type == .TEXTURE_BINDING
                     {
-                        glActiveTexture(GL_TEXTURE0 + working_group.bound_textures);
-                        glBindTexture(GL_TEXTURE_2D, working_group.texture_ids[working_group.bound_textures]);
-
-                        working_group.bound_textures += 1;
+                        for texture_index: 0..working_group.group_texture_count - 1
+                        {
+                            texture_id := working_group.texture_ids[texture_index];
+                            glActiveTexture(GL_TEXTURE0 + texture_id);
+                            glBindTexture(GL_TEXTURE_2D, texture_id);
+                        }
+                        
+                        sampler_units: [MAX_TEXTURE_SLOTS]s32;
+                        for binding: 0..MAX_TEXTURE_SLOTS - 1
+                        {
+                            sampler_units[binding] = xx binding;
+                        }
+                        glUniform1iv(uniform.location_id, MAX_TEXTURE_SLOTS, sampler_units.data);
                     }
                     else
                     {
+                        // TODO(Sleepster): This doesn't actually work... 
                         assert(uniform.type == .TEXTURE_ARRAY);
                         if uniform.location_id != -1
                         {
+                            for texture_index: 0..working_group.group_texture_count - 1
+                            {
+                                texture_id := working_group.texture_ids[texture_index];
+                                glActiveTexture(GL_TEXTURE0 + texture_id);
+                                glBindTexture(GL_TEXTURE_2D, texture_id);
+                            }
+                            
                             sampler_units: [MAX_TEXTURE_SLOTS]s32;
                             for binding: 0..MAX_TEXTURE_SLOTS - 1
                             {

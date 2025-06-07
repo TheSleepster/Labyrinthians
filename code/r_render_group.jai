@@ -112,6 +112,18 @@ r_hash_quad_value :: (shader_id: u32, pass_id: u32, render_layer: u32, max_entri
     return xx((hash % max_entries + max_entries) % max_entries);
 }
 
+add_texture_to_render_group_list :: (render_group: *Render_Group, texture_id: u32)
+{
+    for tex_id: render_group.texture_ids
+    {
+        if texture_id == tex_id then return;
+    }
+    assert(render_group.group_texture_count + 1 < MAX_TEXTURE_SLOTS);
+    
+    render_group.texture_ids[render_group.group_texture_count] = texture_id;
+    render_group.group_texture_count += 1;
+}
+
 // IMPORTANT(Sleepster): PRIME NUMBER 
 MAX_RENDER_GROUPS :: 127;
 
@@ -216,8 +228,7 @@ r_handle_group_buffers :: (render_state: *Render_State)
 
             if working_quad.required_texture_id != U32_MAX 
             {
-                hash_render_group.texture_ids[hash_render_group.group_texture_count] = working_quad.required_texture_id;
-                hash_render_group.group_texture_count += 1;
+                add_texture_to_render_group_list(hash_render_group, working_quad.required_texture_id);
             }
 
             hash_render_group.quad_render_buffer[hash_render_group.current_quad_count] = working_quad.*;

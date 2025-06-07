@@ -6,11 +6,12 @@ Render_Primitive_Data :: struct
     render_color       : Vector4;
     rotation           : float32;
 
-    // NOTE(Sleepster): These are native and dependant on the rendergroup 
+    // NOTE(Sleepster): These are unique to the rendergroup 
     render_pass_id     : u32;
     required_shader_id : u32;
     render_layer       : u32;
     required_texture_id: u32;
+    render_texture_idx : u32;
 
     required_shader    : GPU_Shader;
     required_material  : Render_Material;
@@ -121,6 +122,11 @@ r_create_draw_quad :: (render_state  : *Render_State,
             quad.bottom_right.vTexelData = .{atlas_offset.x + sprite_size.x, atlas_offset.y + sprite_size.y};
             quad.top_right.vTexelData    = .{atlas_offset.x + sprite_size.x, atlas_offset.y};
         }
+
+        for *element: quad.elements
+        {
+            element.vTextureIndex  = texture_id;
+        }
     }
 
     if rotation != 0
@@ -186,9 +192,9 @@ r_draw_quad :: (render_state  : *Render_State,
                 position      :  Vector2,
                 render_size   :  Vector2,
                 draw_color    :  Vector4,
-                texture_id    :  u32               = U32_MAX,
+                texture_id    :  u32               =  U32_MAX,
                 render_options:  Rendering_Options = .RO_NONE, 
-                rotation      :  float32           = 0.0)
+                rotation      :  float32           =  0.0)
 {
     assert(!(render_options & .RO_TEXEL_FETCHED));
     render_quad    := r_create_draw_quad(render_state, position, render_size, draw_color, texture_id, rotation, xx render_options, (Vector2).{}, (Vector2).{});
