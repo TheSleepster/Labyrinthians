@@ -1,3 +1,10 @@
+Render_Group_Flags :: enum
+{
+    USES_FORWARD;
+    NO_LIGHTING;
+    NO_SHADOWS;
+};
+
 // NOTE(Sleepster): This is the only primitive type to make use of an index buffer. The rest don't need it. 
 Render_Group_Quad_Buffer :: struct
 {

@@ -6,9 +6,10 @@ BASIC_SHADER_SOURCE_TEXT :: #string END
 #ifdef VERTEX_SHADER
 layout(location = 0) in vec4 vPosition;
 layout(location = 1) in vec4 vColor;
-layout(location = 2) in vec2 vTexelData;
-layout(location = 3) in uint vRenderingOptions;
-layout(location = 4) in uint vTextureIndex;
+layout(location = 2) in vec3 vVSNormals;
+layout(location = 3) in vec2 vTexelData;
+layout(location = 4) in uint vRenderingOptions;
+layout(location = 5) in uint vTextureIndex;
 
 uniform mat4 ProjectionMatrix;
 uniform mat4 ViewMatrix;
@@ -31,14 +32,27 @@ main()
 #endif
 
 #ifdef FRAGMENT_SHADER
+struct point_light
+{
+    vec4  Color;
+    vec2  vsPosition;
+    vec2  Direction;
+    float SpotAngle;
+    float Attenuation;
+};
+
 layout(location = 0)      in vec4 vOutColor;
 layout(location = 1)      in vec2 vOutTexelData;
 layout(location = 2) flat in uint vOutRenderingOptions;
 layout(location = 3) flat in uint vOutTexIndex;
 
-out vec4 vFragColor;
+layout(std430, binding = 0) buffer PointLightSBO
+{
+    point_light PointLights[];
+};
 
 uniform sampler2D AtlasArray[16];
+out vec4 vFragColor;
 
 void
 main()

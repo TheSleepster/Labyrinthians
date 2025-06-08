@@ -8,14 +8,24 @@ TODO(Sleepster):
 - [ ] Resize matrices when the window changes size
 */
 
-MAX_GROUP_VERTICES :: 10000;
-MAX_QUADS          :: MAX_GROUP_VERTICES / 4;
-MAX_QUAD_INDICES   :: MAX_QUADS * 6;
-MAX_LINES          :: MAX_GROUP_VERTICES / 2;
-MAX_TRIANGLES      :: #run {cast(s64)(floor(MAX_GROUP_VERTICES / 3));}
+MAX_GROUP_VERTICES  :: 10000;
+MAX_QUADS           :: MAX_GROUP_VERTICES / 4;
+MAX_QUAD_INDICES    :: MAX_QUADS * 6;
+MAX_LINES           :: MAX_GROUP_VERTICES / 2;
+MAX_TRIANGLES       :: #run {cast(s64)(floor(MAX_GROUP_VERTICES / 3));}
 MAX_TEXTURE_SLOTS   :: 16;
 MAX_RENDER_PASSES   :: 32;
 ENGINE_TEXTURE_SIZE :: 2048;
+
+// NOTE(Sleepster): VS = view space 
+Point_Light :: struct
+{
+    light_color: Vector4 #align 16;
+    vs_position: Vector2 #align 16;
+    direction  : Vector2 #align 16;
+    spot_angle : float32 #align 16;
+    attenuation: float32 #align 16;
+};
 
 Rendering_Options :: enum u32
 {
@@ -28,17 +38,21 @@ Vertex :: struct
 {
     vPosition     : Vector4;
     vColor        : Vector4;
+    vVSNormals    : Vector3;
     vTexelData    : Vector2;
     vRenderOptions: u32;
     vTextureIndex : u32;
-};
+}#no_padding;
 
 Render_Material :: struct
 {
-    reflectiveness    : float32;
-    illumination_value: float32;
-    opacity           : float32;
-};
+    emissive_strength: float32;
+    ambient_strength : float32;
+    specular_strength: float32;
+    __padding        : float32;
+    diffuse_color    : Vector4;
+    specular_color   : Vector4;
+}#no_padding;
 
 Shader_Uniform_Type :: enum
 {
@@ -221,7 +235,7 @@ gl_shader_update_buffer :: (shader: *GPU_Shader, buffer_name: string, size: s64,
     shader_buffer: *GPU_Shader_Buffer;
     for *buffer: shader.buffer_data
     {
-        if compare_strings(buffer_name, buffer.buffer_name)
+        if compare_strings(buffer_name, buffer.buffer_name) == 0
         {
             shader_buffer = buffer;
         }
@@ -235,6 +249,7 @@ gl_shader_update_buffer :: (shader: *GPU_Shader, buffer_name: string, size: s64,
     else
     {
         log_error("Invalid shader buffer name... name is: %...\n", buffer_name);
+        assert(false);
     }
 }
 
@@ -260,6 +275,7 @@ gl_shader_update_uniform :: (shader: *GPU_Shader, uniform_name: string, data: *v
     else
     {
         log_error("Invalid shader uniform name... name is: %...\n", uniform_name);
+        assert(false);
     }
 }
 
@@ -640,16 +656,18 @@ r_init_renderer_data :: (window: *SDL_Window) -> Render_State
             offset: *T: null;
             glVertexAttribPointer(0, 4, GL_FLOAT, GL_FALSE, size_of(Vertex), xx *offset.vPosition);
             glVertexAttribPointer(1, 4, GL_FLOAT, GL_FALSE, size_of(Vertex), xx *offset.vColor);
-            glVertexAttribPointer(2, 2, GL_FLOAT, GL_FALSE, size_of(Vertex), xx *offset.vTexelData);
+            glVertexAttribPointer(2, 3, GL_FLOAT, GL_FALSE, size_of(Vertex), xx *offset.vVSNormals);
+            glVertexAttribPointer(3, 2, GL_FLOAT, GL_FALSE, size_of(Vertex), xx *offset.vTexelData);
 
-            glVertexAttribIPointer(3, 1, GL_UNSIGNED_INT, size_of(Vertex), xx *offset.vRenderOptions);
-            glVertexAttribIPointer(4, 1, GL_UNSIGNED_INT, size_of(Vertex), xx *offset.vTextureIndex);
+            glVertexAttribIPointer(4, 1, GL_UNSIGNED_INT, size_of(Vertex), xx *offset.vRenderOptions);
+            glVertexAttribIPointer(5, 1, GL_UNSIGNED_INT, size_of(Vertex), xx *offset.vTextureIndex);
             
             glEnableVertexAttribArray(0);
             glEnableVertexAttribArray(1);
             glEnableVertexAttribArray(2);
             glEnableVertexAttribArray(3);
             glEnableVertexAttribArray(4);
+            glEnableVertexAttribArray(5);
 
             glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, 0);
         }
@@ -708,16 +726,22 @@ r_render_group_test_render :: (render_state: *Render_State, asset_manager: *Asse
 
     glBindVertexArray(render_state.primary_vao_id);
 
+    point_light_buffer: [30]Point_Light;
+
     r_handle_group_buffers(render_state);
     for group_index: 0..render_state.draw_frame.render_group_counter - 1
     {
         working_group := render_state.draw_frame.render_groups[group_index];
         working_group.bound_shader.update_uniform(working_group.bound_shader,
                                                   "ProjectionMatrix",
-                                                  *working_group.projection_matrix._11);
+                                                 *working_group.projection_matrix._11);
         working_group.bound_shader.update_uniform(working_group.bound_shader,
                                                   "ViewMatrix",
-                                                  *working_group.view_matrix._11);
+                                                 *working_group.view_matrix._11);
+        working_group.bound_shader.update_buffer(working_group.bound_shader,
+                                                 "PointLightSBO",
+                                                 size_of(Point_Light) * point_light_buffer.count,
+                                                *point_light_buffer);
         opaque_quad_count := working_group.current_quad_count - working_group.t_quad_count;
         
         glBindBuffer(GL_ARRAY_BUFFER, render_state.primary_vbo_id);
@@ -789,9 +813,13 @@ r_render_group_test_render :: (render_state: *Render_State, asset_manager: *Asse
         for buffer_index: 0..shader.buffer_data.count - 1
         {
             shader_buffer := *shader.buffer_data[buffer_index];
-            shader_buffer.update_buffer(shader_buffer.buffer_binding,
-                                        shader_buffer.buffer_size,
-                                        shader_buffer.buffer_data);
+            assert(shader_buffer.buffer_binding != -1);
+            if shader_buffer.update_buffer
+            {
+                shader_buffer.update_buffer(shader_buffer.buffer_binding,
+                                            shader_buffer.buffer_size,
+                                            shader_buffer.buffer_data);
+            }
         }
         glDrawElements(GL_TRIANGLES,
                        opaque_quad_count * 6,

@@ -189,6 +189,7 @@ r_create_draw_quad :: (render_state  : *Render_State,
     {
         element.vColor         = draw_color;
         element.vRenderOptions = render_options;
+        element.vVSNormals     = .{0, 0, 1};
     }
 
     return quad;
