@@ -2,7 +2,6 @@
 {
     #load "os_windows.jai";
 }
-
 #if OS == .LINUX
 {
     #load "os_linux.jai";
@@ -14,7 +13,6 @@
 
 /*
 // NOTE(Sleepster): OS API definitions 
-
 // TODO(Sleepster): os_bootstrap_allocate_memory();  ??? maybe in the future
 
 os_allocate_memory     :: inline (size: u64) -> *void;
@@ -40,8 +38,6 @@ os_load_dynamic_library   ::        (filepath: string) -> OS_Dynamic_Libarary;
 os_unload_dynamic_library ::        (library: *OS_Dynamic_Libarary);
 os_get_proc_address       ::        (library: *OS_Dynamic_Libarary, proc_name: string) -> *void;
 os_exit_process           ::        ();
-
-
 */
 
 interlocked_compare_exchange :: compare_and_swap;

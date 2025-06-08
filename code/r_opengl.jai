@@ -589,6 +589,10 @@ r_init_renderer_data :: (window: *SDL_Window) -> Render_State
         glEnable(GL_DEPTH_TEST);
         glDepthFunc(GL_GREATER);
 
+        glEnable(GL_BLEND);        
+        glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+        glBlendEquation(GL_FUNC_ADD);
+
         glEnable(GL_FRAMEBUFFER_SRGB);
         print("GL Vendor: %\n", to_string(glGetString(GL_VENDOR)));
         print("GL Version: %\n", to_string(glGetString(GL_VERSION)));
@@ -597,7 +601,6 @@ r_init_renderer_data :: (window: *SDL_Window) -> Render_State
     }
 
     // NOTE(Sleepster): RenderState Init 
-
     render_state: Render_State;
     {
         render_state.draw_frame_arena  = c_arena_init(MB(200)); 
@@ -688,10 +691,15 @@ r_render_group_test_render :: (render_state: *Render_State, asset_manager: *Asse
             }
         }
     }
-    r_draw_sprite(render_state, .{-200,  150}, .{100, 100}, .{1, 1, 1, 1}, sprite, deg_to_rad(140));
-    r_draw_quad(render_state,   .{ 200,  150}, .{100, 100}, .{0, 1, 0, 1}, texture.texID, 0);
-    r_draw_quad(render_state,   .{ 200, -150}, .{100, 100}, .{0, 0, 1, 1}, texture.texID, 0);
-    r_draw_quad(render_state,   .{-200, -150}, .{100, 100}, .{1, 1, 1, 1}, texture.texID, .RO_NONE, deg_to_rad(33));
+    r_draw_sprite(render_state, .{-200,  150}, .{100, 100}, .{1, 1, 1, 1},   sprite, deg_to_rad(140));
+    r_draw_quad(render_state,   .{ 200,  150}, .{100, 100}, .{0, 1, 0, 1},   texture.texID, 0);
+    r_draw_quad(render_state,   .{ 200, -150}, .{100, 100}, .{0, 0, 1, 1},   texture.texID, 0);
+    r_draw_quad(render_state,   .{-200, -150}, .{100, 100}, .{1, 1, 1, 1},   texture.texID, .RO_NONE, deg_to_rad(33));
+    r_draw_quad(render_state,   .{-200, -125}, .{ 50,  50}, .{1, 0, 0, 0.8});
+    r_draw_quad(render_state,   .{-175, -125}, .{ 50,  50}, .{0, 0, 1, 0.8});
+
+    glEnable(GL_DEPTH_TEST);
+    glDepthMask(GL_TRUE);
     
     glViewport(0, 0, 1920, 1080);
     glClearColor(0.0, 0.0, 0.0, 1.0);
@@ -710,11 +718,12 @@ r_render_group_test_render :: (render_state: *Render_State, asset_manager: *Asse
         working_group.bound_shader.update_uniform(working_group.bound_shader,
                                                   "ViewMatrix",
                                                   *working_group.view_matrix._11);
+        opaque_quad_count := working_group.current_quad_count - working_group.t_quad_count;
         
         glBindBuffer(GL_ARRAY_BUFFER, render_state.primary_vbo_id);
         glBufferSubData(GL_ARRAY_BUFFER,
                         0,
-                        working_group.vertex_count * size_of(Vertex),
+                        (working_group.vertex_count * size_of(Vertex)),
                         working_group.vertex_buffer.data);
 
         glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, render_state.primary_ebo_id);
@@ -784,11 +793,19 @@ r_render_group_test_render :: (render_state: *Render_State, asset_manager: *Asse
                                         shader_buffer.buffer_size,
                                         shader_buffer.buffer_data);
         }
-
         glDrawElements(GL_TRIANGLES,
-                       working_group.current_quad_count * 6,
+                       opaque_quad_count * 6,
                        GL_UNSIGNED_INT,
                        null);
+
+        // TODO(Sleepster): LIGHTING AND SHADOW STUFF GOES HERE 
+
+        glDisable(GL_DEPTH_TEST);
+        glDepthMask(GL_FALSE);
+        glDrawElements(GL_TRIANGLES,
+                       working_group.t_quad_count * 6,
+                       GL_UNSIGNED_INT,
+                       cast(*void)((opaque_quad_count * 6) * size_of(u32)));
     }
 }
 

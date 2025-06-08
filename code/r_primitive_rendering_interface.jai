@@ -5,6 +5,7 @@ Render_Primitive_Data :: struct
     render_size        : Vector2;
     render_color       : Vector4;
     rotation           : float32;
+    is_transparent     : s32;
 
     // NOTE(Sleepster): These are unique to the rendergroup 
     render_pass_id     : u32;
@@ -63,6 +64,7 @@ Render_Quad :: struct
 };
 
 r_create_draw_quad :: (render_state  : *Render_State,
+                       quad_buffer   : *Render_Group_Quad_Buffer,
                        position      :  Vector2,
                        render_size   :  Vector2,
                        draw_color    :  Vector4,
@@ -77,6 +79,11 @@ r_create_draw_quad :: (render_state  : *Render_State,
     quad.render_size    = render_size;
     quad.render_color   = draw_color;
     quad.rotation       = rotation;
+    if quad.render_color.w < 1.0
+    {
+        quad.is_transparent = 1;
+        quad_buffer.t_quad_count += 1;
+    }
 
     if (render_state.draw_frame.active_view_matrix       != render_state.draw_frame.previous_view_matrix) ||
        (render_state.draw_frame.active_projection_matrix != render_state.draw_frame.previous_projection_matrix)
@@ -197,8 +204,17 @@ r_draw_quad :: (render_state  : *Render_State,
                 rotation      :  float32           =  0.0)
 {
     assert(!(render_options & .RO_TEXEL_FETCHED));
-    render_quad    := r_create_draw_quad(render_state, position, render_size, draw_color, texture_id, rotation, xx render_options, (Vector2).{}, (Vector2).{});
     current_buffer := r_get_render_group_quad_buffer(render_state);
+    render_quad    := r_create_draw_quad(render_state,
+                                         current_buffer,
+                                         position,
+                                         render_size,
+                                         draw_color,
+                                         texture_id,
+                                         rotation,
+                                      xx render_options,
+                                        (Vector2).{},
+                                        (Vector2).{});
 
     current_buffer.quad_buffer[current_buffer.quad_count] = render_quad;
     current_buffer.quad_count += 1;
@@ -212,8 +228,10 @@ r_draw_sprite :: (render_state   : *Render_State,
                   rotation       : float32           = 0.0,
                   render_options : Rendering_Options = .RO_NONE)
 {
+    current_buffer := r_get_render_group_quad_buffer(render_state);
     render_options |= .RO_TEXEL_FETCHED;
     render_quad := r_create_draw_quad(render_state,
+                                      current_buffer,
                                       position,
                                       render_size,
                                       draw_color,
@@ -222,7 +240,6 @@ r_draw_sprite :: (render_state   : *Render_State,
                                    xx render_options,
                                       v2_cast(atlas_sprite.atlas_offset),
                                       v2_cast(atlas_sprite.atlas_size));
-    current_buffer := r_get_render_group_quad_buffer(render_state);
 
     current_buffer.quad_buffer[current_buffer.quad_count] = render_quad;
     current_buffer.quad_count += 1;

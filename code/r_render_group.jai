@@ -8,6 +8,7 @@ Render_Group_Quad_Buffer :: struct
 
     quad_buffer  : []Render_Quad;
     quad_count   :   u32;
+    t_quad_count :   u32;
 
     next_buffer  : *Render_Group_Quad_Buffer;
 };
@@ -43,6 +44,7 @@ Render_Group :: struct
     
     quad_render_buffer : []Render_Quad;
     current_quad_count :   u32;
+    t_quad_count       :   u32;
     
     triangle_buffer_ptr: *Render_Triangle;
     triangle_count     :  u32;
@@ -146,37 +148,45 @@ r_handle_group_buffers :: (render_state: *Render_State)
         sorting_buffer2 := c_arena_push_array(*render_state.draw_frame_arena, Render_Quad, current_quad_buffer.quad_count);
         sorting_buffer3 := c_arena_push_array(*render_state.draw_frame_arena, Render_Quad, current_quad_buffer.quad_count);
         sorting_buffer4 := c_arena_push_array(*render_state.draw_frame_arena, Render_Quad, current_quad_buffer.quad_count);
+        sorting_buffer5 := c_arena_push_array(*render_state.draw_frame_arena, Render_Quad, current_quad_buffer.quad_count);
         
         radix_sort(current_quad_buffer.quad_buffer.data,
                    sorting_buffer.data,
-                   xx current_quad_buffer.quad_count,
+                xx current_quad_buffer.quad_count,
                    size_of(Render_Quad), 
-                   xx offset_of(Render_Quad, #code required_shader_id),
+                xx offset_of(Render_Quad, #code required_shader_id),
                    8);
 
         radix_sort(current_quad_buffer.quad_buffer.data,
                    sorting_buffer2.data,
-                   xx current_quad_buffer.quad_count,
+                xx current_quad_buffer.quad_count,
                    size_of(Render_Quad), 
-                   xx offset_of(Render_Quad, #code render_pass_id),
+                xx offset_of(Render_Quad, #code render_pass_id),
                    8);
 
         radix_sort(current_quad_buffer.quad_buffer.data,
                    sorting_buffer3.data,
-                   xx current_quad_buffer.quad_count,
+                xx current_quad_buffer.quad_count,
                    size_of(Render_Quad), 
-                   xx offset_of(Render_Quad, #code render_layer),
+                xx offset_of(Render_Quad, #code render_layer),
                    8);
 
         if draw_frame.bound_texture_counter > 1
         {
             radix_sort(current_quad_buffer.quad_buffer.data,
                        sorting_buffer4.data,
-                       xx current_quad_buffer.quad_count,
+                    xx current_quad_buffer.quad_count,
                        size_of(Render_Quad), 
-                       xx offset_of(Render_Quad, #code required_texture_id),
+                    xx offset_of(Render_Quad, #code required_texture_id),
                        8);
         }
+
+        radix_sort(current_quad_buffer.quad_buffer.data,
+                   sorting_buffer5.data,
+                xx current_quad_buffer.quad_count,
+                   size_of(Render_Quad),
+                xx offset_of(Render_Quad, #code is_transparent),
+                   4);
         
         c_arena_end_temporary_memory(*scratch_buffer);
         current_quad_buffer = current_quad_buffer.next_buffer;
@@ -250,6 +260,10 @@ r_handle_group_buffers :: (render_state: *Render_State)
             {
                 working_quad      := *working_group.quad_render_buffer[quad_index];
                 vertex_buffer_ptr := *working_group.vertex_buffer[working_group.vertex_count];
+                if working_quad.is_transparent
+                {
+                    working_group.t_quad_count += 1;
+                }
 
                 bottom_left : *Vertex = vertex_buffer_ptr + 0;
                 top_left    : *Vertex = vertex_buffer_ptr + 1;
