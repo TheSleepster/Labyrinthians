@@ -245,3 +245,25 @@ r_draw_sprite :: (render_state   : *Render_State,
     current_buffer.quad_buffer[current_buffer.quad_count] = render_quad;
     current_buffer.quad_count += 1;
 }
+
+// NOTE(Sleepster): Angle is in radians 
+r_create_point_light :: (render_state: *Render_State,
+                         position    :  Vector2,
+                         light_color :  Vector4,
+                         direction   :  Vector2,
+                         spot_angle  :  float32,
+                         attenuation :  Light_Attenuation_Data) -> *Point_Light
+{
+    point_light := *render_state.draw_frame.point_light_buffer[render_state.draw_frame.point_light_count];
+    point_light.light_color = light_color;
+
+    point_light_pos        := mat4_transform(render_state.draw_frame.active_view_matrix, v2_expand(position, 0, 1));
+    point_light.vs_position = point_light_pos.xy;
+
+    point_light.spot_angle  = spot_angle;
+    point_light.direction   = direction;
+    point_light.attenuation = attenuation;
+    render_state.draw_frame.point_light_count += 1;
+
+    return point_light;
+}

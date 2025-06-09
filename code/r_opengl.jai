@@ -15,16 +15,24 @@ MAX_LINES           :: MAX_GROUP_VERTICES / 2;
 MAX_TRIANGLES       :: #run {cast(s64)(floor(MAX_GROUP_VERTICES / 3));}
 MAX_TEXTURE_SLOTS   :: 16;
 MAX_RENDER_PASSES   :: 32;
+MAX_LIGHTS          :: 2048;
 ENGINE_TEXTURE_SIZE :: 2048;
 
 // NOTE(Sleepster): VS = view space 
+Light_Attenuation_Data :: struct
+{
+    constant : float32;
+    linear   : float32;
+    quadratic: float32;
+};
+
 Point_Light :: struct
 {
-    light_color: Vector4 #align 16;
-    vs_position: Vector2 #align 16;
-    direction  : Vector2 #align 16;
-    spot_angle : float32 #align 16;
-    attenuation: float32 #align 16;
+    light_color: Vector4;
+    vs_position: Vector2;
+    direction  : Vector2;
+    spot_angle : float32;
+    attenuation: Light_Attenuation_Data;
 };
 
 Rendering_Options :: enum u32
@@ -83,6 +91,7 @@ GPU_Shader_Buffer :: struct
 {
     buffer_name   :  string;
     buffer_binding:  u32;
+    location_id   :  u32;
 
     update_buffer :  (location: u32, size: s64, data: *void);
     buffer_size   :  s64;
@@ -131,6 +140,9 @@ Draw_Frame :: struct
 
     bound_texture_counter     :   u32; 
     active_shader             :  *GPU_Shader;
+
+    point_light_buffer        : []Point_Light;
+    point_light_count         :   u32;
     
     // NOTE(Sleepster): Linked Lists 
     quad_buffers              :   Render_Group_Quad_Buffer;
@@ -238,13 +250,15 @@ gl_shader_update_buffer :: (shader: *GPU_Shader, buffer_name: string, size: s64,
         if compare_strings(buffer_name, buffer.buffer_name) == 0
         {
             shader_buffer = buffer;
+            break;
         }
     }
 
     if shader_buffer
     {
-        shader_buffer.buffer_data = data;
-        shader_buffer.buffer_size = size;
+        shader_buffer.buffer_data   = data;
+        shader_buffer.buffer_size   = size;
+        shader_buffer.update_buffer = gl_update_shader_buffer;
     }
     else
     {
@@ -261,6 +275,7 @@ gl_shader_update_uniform :: (shader: *GPU_Shader, uniform_name: string, data: *v
         if compare_strings(uniform_name, uniform.uniform_name) == 0
         {
             shader_uniform = uniform;
+            break;
         }
     }
 
@@ -495,6 +510,10 @@ compile_shader_source :: (arena: *Memory_Arena, source: *string, type: GPU_Shade
                                            null,
                                           *shader_buffer_binding);
                     current_buffer.buffer_binding = xx shader_buffer_binding;
+
+                    glGenBuffers(1, *current_buffer.location_id);
+                    glBindBuffer(GL_SHADER_STORAGE_BUFFER, current_buffer.location_id);
+                    glBufferData(GL_SHADER_STORAGE_BUFFER, MAX_LIGHTS * size_of(Point_Light), null, GL_DYNAMIC_DRAW);
                 }
             }
         }
@@ -676,12 +695,15 @@ r_init_renderer_data :: (window: *SDL_Window) -> Render_State
     render_state.test_shader = compile_shader_source(*render_state.render_data_arena,
                                                      *BASIC_SHADER_SOURCE_TEXT,
                                                      .PIXEL);
+
     return render_state;
 }
 
 #no_reset uploaded_debug_texture: bool = false;
 r_render_group_test_render :: (render_state: *Render_State, asset_manager: *Asset_Manager)
 {
+    render_state.draw_frame.point_light_buffer = c_arena_push_array(*render_state.draw_frame_arena, Point_Light, 50);
+
     render_state.draw_frame.active_shader            = asset_get_shader(asset_manager, "Basic_Shader");
     render_state.draw_frame.active_view_matrix       = mat4_identity();
     render_state.draw_frame.active_projection_matrix = orthographic_projection_matrix(1920 * -0.5,
@@ -695,7 +717,6 @@ r_render_group_test_render :: (render_state: *Render_State, asset_manager: *Asse
     r_draw_quad(render_state, .{ 100,    0}, .{100, 100}, .{0, 0, 1, 1});
     r_draw_quad(render_state, .{ 100,  150}, .{100, 100}, .{1, 0, 1, 1});
 
-    
     sprite  := asset_get_sprite(asset_manager, "player");
     texture := asset_get_texture(asset_manager, "player");
     if !uploaded_debug_texture
@@ -716,6 +737,8 @@ r_render_group_test_render :: (render_state: *Render_State, asset_manager: *Asse
     r_draw_quad(render_state,   .{-200, -125}, .{ 50,  50}, .{1, 0, 0, 0.8});
     r_draw_quad(render_state,   .{-175, -125}, .{ 50,  50}, .{0, 0, 1, 0.8});
 
+    light := r_create_point_light(render_state, .{250, 0}, .{0, 1, 0, 1}, .{1, 0}, deg_to_rad(360), .{1.0, 0.35, 1.80});
+    
     glEnable(GL_DEPTH_TEST);
     glDepthMask(GL_TRUE);
     
@@ -726,24 +749,31 @@ r_render_group_test_render :: (render_state: *Render_State, asset_manager: *Asse
 
     glBindVertexArray(render_state.primary_vao_id);
 
-    point_light_buffer: [30]Point_Light;
+    ambient_factor: float32 = 0.4;
 
     r_handle_group_buffers(render_state);
     for group_index: 0..render_state.draw_frame.render_group_counter - 1
     {
         working_group := render_state.draw_frame.render_groups[group_index];
         working_group.bound_shader.update_uniform(working_group.bound_shader,
-                                                  "ProjectionMatrix",
+                                                  "uProjectionMatrix",
                                                  *working_group.projection_matrix._11);
         working_group.bound_shader.update_uniform(working_group.bound_shader,
-                                                  "ViewMatrix",
+                                                  "uViewMatrix",
                                                  *working_group.view_matrix._11);
+        working_group.bound_shader.update_uniform(working_group.bound_shader,
+                                                  "uPointLightCount",
+                                                 *render_state.draw_frame.point_light_count);
+        working_group.bound_shader.update_uniform(working_group.bound_shader,
+                                                  "uAmbientLighting",
+                                                 *ambient_factor);
+
         working_group.bound_shader.update_buffer(working_group.bound_shader,
                                                  "PointLightSBO",
-                                                 size_of(Point_Light) * point_light_buffer.count,
-                                                *point_light_buffer);
+                                                 size_of(Point_Light) * render_state.draw_frame.point_light_count,
+                                                 render_state.draw_frame.point_light_buffer.data);
+
         opaque_quad_count := working_group.current_quad_count - working_group.t_quad_count;
-        
         glBindBuffer(GL_ARRAY_BUFFER, render_state.primary_vbo_id);
         glBufferSubData(GL_ARRAY_BUFFER,
                         0,
@@ -814,12 +844,10 @@ r_render_group_test_render :: (render_state: *Render_State, asset_manager: *Asse
         {
             shader_buffer := *shader.buffer_data[buffer_index];
             assert(shader_buffer.buffer_binding != -1);
-            if shader_buffer.update_buffer
-            {
-                shader_buffer.update_buffer(shader_buffer.buffer_binding,
-                                            shader_buffer.buffer_size,
-                                            shader_buffer.buffer_data);
-            }
+            assert(shader_buffer.update_buffer  != null);
+            shader_buffer.update_buffer(shader_buffer.location_id,
+                                        shader_buffer.buffer_size,
+                                        shader_buffer.buffer_data);
         }
         glDrawElements(GL_TRIANGLES,
                        opaque_quad_count * 6,
@@ -840,5 +868,6 @@ r_render_group_test_render :: (render_state: *Render_State, asset_manager: *Asse
 r_reset_draw_frame :: inline (render_state: *Render_State)
 {
     c_arena_reset(*render_state.draw_frame_arena);
-    render_state.draw_frame = .{};
+    render_state.draw_frame.point_light_count = 0;
+    render_state.draw_frame                   = .{};
 }
