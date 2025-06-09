@@ -254,7 +254,7 @@ r_create_point_light :: (render_state: *Render_State,
                          direction   :  Vector2,
                          spot_angle  :  float32,
                          radius      :  float32,
-                         attenuation :  Light_Attenuation_Data) -> *Point_Light
+                         strength    :  float32 = 1.0) -> *Point_Light
 {
     point_light := *render_state.draw_frame.point_light_buffer[render_state.draw_frame.point_light_count];
     point_light.light_color = light_color;
@@ -265,7 +265,7 @@ r_create_point_light :: (render_state: *Render_State,
     point_light.spot_angle  = spot_angle;
     point_light.radius      = radius;
     point_light.direction   = direction;
-    point_light.attenuation = attenuation;
+    point_light.strength    = strength;
     render_state.draw_frame.point_light_count += 1;
 
     return point_light;
@@ -274,4 +274,25 @@ r_create_point_light :: (render_state: *Render_State,
 r_push_render_layer :: inline (render_state: *Render_State, layer: u32)
 {
     render_state.draw_frame.current_render_layer = layer;
+}
+
+r_set_render_material :: inline (render_state: *Render_State, material: *Render_Material)
+{
+    render_state.draw_frame.active_render_material = material;
+}
+
+r_set_render_view_matrix :: inline (render_state: *Render_State, matrix: Matrix4)
+{
+    render_state.draw_frame.active_view_matrix = matrix;
+}
+
+r_set_render_projection_matrix :: inline (render_state: *Render_State, matrix: Matrix4)
+{
+    render_state.draw_frame.active_projection_matrix = matrix;
+}
+
+r_set_render_matrices :: inline (render_state: *Render_State, view_matrix: Matrix4, projection_matrix: Matrix4)
+{
+    render_state.draw_frame.active_view_matrix       = view_matrix;
+    render_state.draw_frame.active_projection_matrix = projection_matrix;
 }

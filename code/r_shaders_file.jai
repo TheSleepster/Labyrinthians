@@ -2,14 +2,6 @@ BASIC_SHADER_SOURCE_TEXT :: #string END
 #define RO_NONE          0 
 #define RO_TEXEL_FETCHED 0x01
 #define RO_UNLIT         0x02
-
-struct light_attenuation_data
-{
-    float Constant;
-    float Linear;
-    float Quadratic;
-};
-
 struct point_light
 {
     vec4                   Color;
@@ -17,8 +9,8 @@ struct point_light
     vec2                   Direction;
     float                  SpotAngle;
     float                  Radius;
+    float                  Strength; 
     float                  padding;
-    light_attenuation_data Attenuation;
 };
 
 #ifdef VERTEX_SHADER
@@ -98,13 +90,14 @@ main()
     }
     DiffuseColor = DiffuseColor * vOutColor;
 
+    // TODO(Sleepster): Render Options for being unaffected by lights, and being unaffected by ambient light
     vec3  Normal       = vOutVSNormals;
     vec3  FragPos      = vOutFragPos.xyz;
     vec3  AmbientLight = vec3(uAmbientLighting);
 
     const float TileSize = 16.0;
-
     vec3 TotalLighting = vec3(0);
+    vec3 Specular      = vec3(0);
     for(uint LightIndex = 0;
         LightIndex < uPointLightCount;
         ++LightIndex)
@@ -113,19 +106,24 @@ main()
         vec2 FragTilePos    = floor(FragPos.xy / TileSize) * TileSize + TileSize * 0.5;
         vec3 SnappedFragPos = vec3(FragTilePos, FragPos.z);
 
-        vec3  LightDir  = normalize(vec3(Light.vsPosition, 0.0) - SnappedFragPos);
-        float LightDist = length(vec3(Light.vsPosition, 0.0) - SnappedFragPos);
+        vec3  LightDir   = normalize(vec3(Light.vsPosition, 0.0) - SnappedFragPos);
+        vec3  ReflectDir = reflect(-LightDir, Normal);
+        float LightDist  = length(vec3(Light.vsPosition, 0.0) - SnappedFragPos);
         if(LightDist > Light.Radius) continue;
 
         float MaxSteps    = 500.0;
         float CurrentStep = floor((1.0 - (LightDist / Light.Radius)) * MaxSteps) / MaxSteps;
-        float Attenuation = CurrentStep;
+        float Attenuation = CurrentStep * (1.0 - (LightDist / Light.Radius));
 
-        vec3 AdditiveLighting = Light.Color.rgb * Attenuation;
-        TotalLighting        += AdditiveLighting;
+        float Shine = 128.0;
+        float SpecularLighting = pow(max(dot(Normal, ReflectDir), 0.0), Shine);
+        vec3  AdditiveLighting = Light.Color.rgb * Attenuation;
+
+        TotalLighting        += AdditiveLighting * Light.Strength;
+        Specular             += 0.5 * SpecularLighting * Light.Color.rgb;
     }
 
-    vFragColor = vec4(DiffuseColor.rgb * AmbientLight + TotalLighting, DiffuseColor.a);
+    vFragColor = vec4(DiffuseColor.rgb * AmbientLight + TotalLighting + Specular, DiffuseColor.a);
 }
 #endif
 END

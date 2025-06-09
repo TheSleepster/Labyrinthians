@@ -2,8 +2,11 @@
 TODO(Sleepster):
 - [x] Rendering Options
 - [x] Texturing
+- [x] Allow the renderer to support Point Lights
+- [ ] render_options for allowing objects to remain unaffected by both ambient and point lights
+- [ ] add a "light_strength" field to point lights to brighten or dim the light
+- [ ] remove the old 'Light_Attenuation_Data' field from the Point_Light 
 - [ ] Rendering Lines  
-- [ ] Allow the renderer to support Point Lights
 - [ ] Functions like 'draw_quad_xform()' that would allow XForm placement
 - [ ] Resize matrices when the window changes size
 */
@@ -19,13 +22,6 @@ MAX_LIGHTS          :: 2048;
 ENGINE_TEXTURE_SIZE :: 2048;
 
 // NOTE(Sleepster): VS = view space 
-Light_Attenuation_Data :: struct
-{
-    constant : float32;
-    linear   : float32;
-    quadratic: float32;
-};
-
 Point_Light :: struct
 {
     light_color: Vector4;
@@ -33,8 +29,7 @@ Point_Light :: struct
     direction  : Vector2;
     spot_angle : float32;
     radius     : float32;
-    __padding  : float32;
-    attenuation: Light_Attenuation_Data;
+    strength   : float32;
 };
 
 Rendering_Options :: enum u32
@@ -56,12 +51,14 @@ Vertex :: struct
 
 Render_Material :: struct
 {
-    emissive_strength: float32;
-    ambient_strength : float32;
-    specular_strength: float32;
-    __padding        : float32;
-    diffuse_color    : Vector4;
-    specular_color   : Vector4;
+    ambient_color     : Vector4;
+    specular_color    : Vector4;
+    shine_color       : Vector4;
+
+    ambient_strength  : float32;
+    specular_strength : float32;
+    shine_strength    : float32;
+    __padding         : float32;
 }#no_padding;
 
 Shader_Uniform_Type :: enum
@@ -132,20 +129,20 @@ Draw_Frame :: struct
 {
     used_projection_matrices  : [MAX_RENDER_PASSES]Matrix4;
     used_view_matrices        : [MAX_RENDER_PASSES]Matrix4;
-    
-    active_view_matrix        :   Matrix4;
-    active_projection_matrix  :   Matrix4;
 
     previous_view_matrix      :   Matrix4;
     previous_projection_matrix:   Matrix4;
     pass_count                :   u32;
 
     bound_texture_counter     :   u32; 
-    active_shader             :  *GPU_Shader;
 
     point_light_buffer        : []Point_Light;
     point_light_count         :   u32;
 
+    active_view_matrix        :   Matrix4;
+    active_projection_matrix  :   Matrix4;
+    active_shader             :  *GPU_Shader;
+    active_render_material    :  *Render_Material;
     current_render_layer      :   u32;
     
     // NOTE(Sleepster): Linked Lists 
@@ -619,6 +616,7 @@ r_init_renderer_data :: (window: *SDL_Window) -> Render_State
         SDL_GL_SetAttribute(SDL_GL_DOUBLEBUFFER, 1);
         SDL_GL_SetAttribute(SDL_GL_FRAMEBUFFER_SRGB_CAPABLE, 1);
         SDL_GL_SetAttribute(SDL_GL_DEPTH_SIZE, 24);
+        SDL_GL_SetAttribute(SDL_GL_STENCIL_SIZE, 8);
         
         gl_context := SDL_GL_CreateContext(window);
         SDL_GL_MakeCurrent(window, gl_context);
@@ -627,6 +625,9 @@ r_init_renderer_data :: (window: *SDL_Window) -> Render_State
 
         glEnable(GL_DEPTH_TEST);
         glDepthFunc(GL_GREATER);
+
+        glEnable(GL_STENCIL_TEST);
+        glStencilMask(0xFF);
 
         glEnable(GL_BLEND);        
         glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
@@ -717,7 +718,7 @@ r_render_group_test_render :: (render_state: *Render_State, asset_manager: *Asse
                                                                                      -1.0,
                                                                                       1.0);
     r_push_render_layer(render_state, 17);
-    r_draw_quad(render_state,   .{   0, -250}, .{500, 500}, .{0, 0, 0, 1});
+    r_draw_quad(render_state,   .{-1000, -500}, .{1920, 1080}, .{0, 0, 0, 1});
     r_push_render_layer(render_state, 16);
 
     r_draw_quad(render_state, .{  10,   10}, .{100, 100}, .{1, 0, 0, 1}, U32_MAX, .RO_NONE, deg_to_rad(140));
@@ -738,22 +739,23 @@ r_render_group_test_render :: (render_state: *Render_State, asset_manager: *Asse
             }
         }
     }
-    r_draw_sprite(render_state, .{-200,  150}, .{100, 100}, .{1, 1, 1, 1},   sprite, deg_to_rad(140));
+    r_draw_sprite(render_state, .{-200,  150}, .{100, 100}, .{1, 0, 0, 1},   sprite, deg_to_rad(140));
     r_draw_quad(render_state,   .{ 200,  150}, .{100, 100}, .{0, 1, 0, 1},   texture.texID, 0);
     r_draw_quad(render_state,   .{ 200, -150}, .{100, 100}, .{0, 0, 1, 1},   texture.texID, 0);
-    r_draw_quad(render_state,   .{-200, -150}, .{100, 100}, .{1, 1, 1, 1},   texture.texID, .RO_NONE, deg_to_rad(33));
+    r_draw_quad(render_state,   .{-200, -150}, .{100, 100}, .{1, 0, 1, 1},   texture.texID, .RO_NONE, deg_to_rad(33));
     r_draw_quad(render_state,   .{-200, -125}, .{ 50,  50}, .{1, 0, 0, 0.8});
     r_draw_quad(render_state,   .{-175, -125}, .{ 50,  50}, .{0, 0, 1, 0.8});
 
-    light := r_create_point_light(render_state, .{250, 0}, .{0.06, 0.01, 0.04, 1.0}, .{1, 0}, deg_to_rad(360), 160, .{0.05, 0.0009, 0.001});
+    light := r_create_point_light(render_state, .{250, 0}, .{0.30, 0.30, 0.30, 1.0}, .{1, 0}, deg_to_rad(360), 500, 2.0);
     
-    glEnable(GL_DEPTH_TEST);
-    glDepthMask(GL_TRUE);
+    glStencilOp(GL_KEEP, GL_KEEP, GL_REPLACE);  
+    glStencilFunc(GL_ALWAYS, 1, 0xFF); // all fragments should pass the stencil test
+    glStencilMask(0xFF); // enable writing to the stencil buffer
     
     glViewport(0, 0, 1920, 1080);
     glClearColor(0.0, 0.0, 0.0, 1.0);
     glClearDepth(0.0);
-    glClear(GL_COLOR_BUFFER_BIT|GL_DEPTH_BUFFER_BIT);
+    glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT | GL_STENCIL_BUFFER_BIT);
 
     glBindVertexArray(render_state.primary_vao_id);
 
@@ -859,7 +861,7 @@ r_render_group_test_render :: (render_state: *Render_State, asset_manager: *Asse
         }
         if opaque_quad_count > 0
         {
-            glEnable(GL_DEPTH_TEST);
+            glDepthFunc(GL_GREATER);
             glDepthMask(GL_TRUE);
             glDrawElements(GL_TRIANGLES,
                            opaque_quad_count * 6,
@@ -871,7 +873,7 @@ r_render_group_test_render :: (render_state: *Render_State, asset_manager: *Asse
 
         if working_group.t_quad_count > 0
         {
-            glDisable(GL_DEPTH_TEST);
+            glDepthFunc(GL_GEQUAL);
             glDepthMask(GL_FALSE);
             glDrawElements(GL_TRIANGLES,
                            working_group.t_quad_count * 6,
