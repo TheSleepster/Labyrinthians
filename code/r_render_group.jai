@@ -134,7 +134,7 @@ add_texture_to_render_group_list :: (render_group: *Render_Group, texture_id: u3
 }
 
 // IMPORTANT(Sleepster): PRIME NUMBER 
-MAX_RENDER_GROUPS :: 127;
+MAX_RENDER_GROUPS :: 1024;
 
 // NOTE(Sleepster): This function is used to work to set up the amount of render groups we need
 r_handle_group_buffers :: (render_state: *Render_State)

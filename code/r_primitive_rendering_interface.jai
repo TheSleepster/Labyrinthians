@@ -113,6 +113,7 @@ r_create_draw_quad :: (render_state  : *Render_State,
     bottom_right := (Vector2).{right, bottom};
 
     quad.required_texture_id     = texture_id;
+    quad.render_layer            = render_state.draw_frame.current_render_layer;
     if texture_id != U32_MAX
     {
         if !(render_options & xx Rendering_Options.RO_TEXEL_FETCHED)
@@ -252,6 +253,7 @@ r_create_point_light :: (render_state: *Render_State,
                          light_color :  Vector4,
                          direction   :  Vector2,
                          spot_angle  :  float32,
+                         radius      :  float32,
                          attenuation :  Light_Attenuation_Data) -> *Point_Light
 {
     point_light := *render_state.draw_frame.point_light_buffer[render_state.draw_frame.point_light_count];
@@ -261,9 +263,15 @@ r_create_point_light :: (render_state: *Render_State,
     point_light.vs_position = point_light_pos.xy;
 
     point_light.spot_angle  = spot_angle;
+    point_light.radius      = radius;
     point_light.direction   = direction;
     point_light.attenuation = attenuation;
     render_state.draw_frame.point_light_count += 1;
 
     return point_light;
+}
+
+r_push_render_layer :: inline (render_state: *Render_State, layer: u32)
+{
+    render_state.draw_frame.current_render_layer = layer;
 }

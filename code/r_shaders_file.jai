@@ -16,6 +16,8 @@ struct point_light
     vec2                   vsPosition;
     vec2                   Direction;
     float                  SpotAngle;
+    float                  Radius;
+    float                  padding;
     light_attenuation_data Attenuation;
 };
 
@@ -94,10 +96,13 @@ main()
     {
         DiffuseColor = vOutColor;
     }
+    DiffuseColor = DiffuseColor * vOutColor;
 
     vec3  Normal       = vOutVSNormals;
     vec3  FragPos      = vOutFragPos.xyz;
     vec3  AmbientLight = vec3(uAmbientLighting);
+
+    const float TileSize = 8.0;
 
     vec3 TotalLighting = vec3(0);
     for(uint LightIndex = 0;
@@ -105,18 +110,22 @@ main()
         ++LightIndex)
     {
         point_light Light = PointLights[LightIndex];
-        vec3  LightDir  = normalize(vec3(Light.vsPosition, 0.0) - FragPos);
-        float LightDist = length(vec3(Light.vsPosition, 0.0) - FragPos);
+        vec2 FragTilePos    = floor(FragPos.xy / TileSize) * TileSize + TileSize * 0.5;
+        vec3 SnappedFragPos = vec3(FragTilePos, FragPos.z);
 
-        float Attenuation = 1.0 / (Light.Attenuation.Constant  + 
-                                   Light.Attenuation.Linear    * LightDist  + 
-                                   Light.Attenuation.Quadratic * (LightDist * LightDist));
-        vec3 DiffuseLighting = DiffuseColor.rgb * Light.Color.rgb * Attenuation * (1.0 - LightDist);
-        TotalLighting += Light.Color.rgb;
+        vec3  LightDir  = normalize(vec3(Light.vsPosition, 0.0) - SnappedFragPos);
+        float LightDist = length(vec3(Light.vsPosition, 0.0) - SnappedFragPos);
+        if(LightDist > Light.Radius) continue;
+
+        float MaxSteps    = 16.0;
+        float CurrentStep = floor((1.0 - (LightDist / Light.Radius)) * MaxSteps) / MaxSteps;
+        float Attenuation = CurrentStep;
+
+        vec3 AdditiveLighting = Light.Color.rgb * Attenuation;
+        TotalLighting        += AdditiveLighting;
     }
 
     vFragColor = vec4(DiffuseColor.rgb * AmbientLight + TotalLighting, DiffuseColor.a);
-    //vFragColor = vec4(DiffuseColor.rgb * AmbientLight + TotalLighting, DiffuseColor.a) * vOutColor;
 }
 #endif
 END

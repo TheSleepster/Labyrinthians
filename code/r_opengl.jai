@@ -32,6 +32,8 @@ Point_Light :: struct
     vs_position: Vector2;
     direction  : Vector2;
     spot_angle : float32;
+    radius     : float32;
+    __padding  : float32;
     attenuation: Light_Attenuation_Data;
 };
 
@@ -143,6 +145,8 @@ Draw_Frame :: struct
 
     point_light_buffer        : []Point_Light;
     point_light_count         :   u32;
+
+    current_render_layer      :   u32;
     
     // NOTE(Sleepster): Linked Lists 
     quad_buffers              :   Render_Group_Quad_Buffer;
@@ -712,6 +716,10 @@ r_render_group_test_render :: (render_state: *Render_State, asset_manager: *Asse
                                                                                       1080 *  0.5,
                                                                                      -1.0,
                                                                                       1.0);
+    r_push_render_layer(render_state, 17);
+    r_draw_quad(render_state,   .{   0, -250}, .{500, 500}, .{0, 0, 0, 1});
+    r_push_render_layer(render_state, 16);
+
     r_draw_quad(render_state, .{  10,   10}, .{100, 100}, .{1, 0, 0, 1}, U32_MAX, .RO_NONE, deg_to_rad(140));
     r_draw_quad(render_state, .{-100, -100}, .{100, 100}, .{0, 1, 0, 1});
     r_draw_quad(render_state, .{ 100,    0}, .{100, 100}, .{0, 0, 1, 1});
@@ -737,7 +745,7 @@ r_render_group_test_render :: (render_state: *Render_State, asset_manager: *Asse
     r_draw_quad(render_state,   .{-200, -125}, .{ 50,  50}, .{1, 0, 0, 0.8});
     r_draw_quad(render_state,   .{-175, -125}, .{ 50,  50}, .{0, 0, 1, 0.8});
 
-    light := r_create_point_light(render_state, .{250, 0}, .{0, 1, 0, 1}, .{1, 0}, deg_to_rad(360), .{1.0, 0.35, 1.80});
+    light := r_create_point_light(render_state, .{250, 0}, .{0.06, 0.01, 0.04, 1.0}, .{1, 0}, deg_to_rad(360), 160, .{0.05, 0.0009, 0.001});
     
     glEnable(GL_DEPTH_TEST);
     glDepthMask(GL_TRUE);
@@ -849,25 +857,34 @@ r_render_group_test_render :: (render_state: *Render_State, asset_manager: *Asse
                                         shader_buffer.buffer_size,
                                         shader_buffer.buffer_data);
         }
-        glDrawElements(GL_TRIANGLES,
-                       opaque_quad_count * 6,
-                       GL_UNSIGNED_INT,
-                       null);
+        if opaque_quad_count > 0
+        {
+            glEnable(GL_DEPTH_TEST);
+            glDepthMask(GL_TRUE);
+            glDrawElements(GL_TRIANGLES,
+                           opaque_quad_count * 6,
+                           GL_UNSIGNED_INT,
+                           null);
+        }
 
         // TODO(Sleepster): LIGHTING AND SHADOW STUFF GOES HERE 
 
-        glDisable(GL_DEPTH_TEST);
-        glDepthMask(GL_FALSE);
-        glDrawElements(GL_TRIANGLES,
-                       working_group.t_quad_count * 6,
-                       GL_UNSIGNED_INT,
-                       cast(*void)((opaque_quad_count * 6) * size_of(u32)));
+        if working_group.t_quad_count > 0
+        {
+            glDisable(GL_DEPTH_TEST);
+            glDepthMask(GL_FALSE);
+            glDrawElements(GL_TRIANGLES,
+                           working_group.t_quad_count * 6,
+                           GL_UNSIGNED_INT,
+                           cast(*void)((opaque_quad_count * 6) * size_of(u32)));
+        }
     }
 }
 
 r_reset_draw_frame :: inline (render_state: *Render_State)
 {
     c_arena_reset(*render_state.draw_frame_arena);
-    render_state.draw_frame.point_light_count = 0;
-    render_state.draw_frame                   = .{};
+    render_state.draw_frame.point_light_count    = 0;
+    render_state.draw_frame.current_render_layer = 32;
+    render_state.draw_frame                      = .{};
 }
