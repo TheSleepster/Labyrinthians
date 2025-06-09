@@ -32,12 +32,12 @@ layout(location = 5) in uint vTextureIndex;
 uniform mat4 uProjectionMatrix;
 uniform mat4 uViewMatrix;
 
-     out vec4 vOutColor; 
-     out vec2 vOutTexelData;
-     out vec3 vOutVSNormals;
-     out vec4 vOutFragPos;
-flat out uint vOutRenderingOptions;
-flat out uint vOutTexIndex;
+layout(location = 0)      out vec4 vOutColor; 
+layout(location = 1)      out vec2 vOutTexelData;
+layout(location = 2)      out vec3 vOutVSNormals;
+layout(location = 3)      out vec4 vOutFragPos;
+layout(location = 4) flat out uint vOutRenderingOptions;
+layout(location = 5) flat out uint vOutTexIndex;
 
 void
 main()
@@ -102,14 +102,14 @@ main()
     vec3  FragPos      = vOutFragPos.xyz;
     vec3  AmbientLight = vec3(uAmbientLighting);
 
-    const float TileSize = 8.0;
+    const float TileSize = 16.0;
 
     vec3 TotalLighting = vec3(0);
     for(uint LightIndex = 0;
         LightIndex < uPointLightCount;
         ++LightIndex)
     {
-        point_light Light = PointLights[LightIndex];
+        point_light Light   = PointLights[LightIndex];
         vec2 FragTilePos    = floor(FragPos.xy / TileSize) * TileSize + TileSize * 0.5;
         vec3 SnappedFragPos = vec3(FragTilePos, FragPos.z);
 
@@ -117,7 +117,7 @@ main()
         float LightDist = length(vec3(Light.vsPosition, 0.0) - SnappedFragPos);
         if(LightDist > Light.Radius) continue;
 
-        float MaxSteps    = 16.0;
+        float MaxSteps    = 500.0;
         float CurrentStep = floor((1.0 - (LightDist / Light.Radius)) * MaxSteps) / MaxSteps;
         float Attenuation = CurrentStep;
 
