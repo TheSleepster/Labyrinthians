@@ -105,7 +105,7 @@ main()
     vec3  Normal       = vOutVSNormals;
     vec3  FragPos      = vOutFragPos.xyz;
     vec3  AmbientLight = vec3(uAmbientLighting);
-
+    
     const float TileSize = 16.0;
     vec3 TotalLighting = vec3(0);
     vec3 Specular      = vec3(0);
