@@ -26,6 +26,9 @@ os_create_thread       :: inline (user_data)
 os_thread_start        ::        (semaphore: *void, to_release: s32) -> s32;
 os_close_thread_handle ::        (thread_data: OS_Thread) -> bool;
 
+tm_lock                ::        (mutex: *Ticket_Mutex) -> bool
+tm_unlock              ::        (mutex: *Ticket_Mutex)
+
 os_socket_get_last_error  :: inline () -> OS_Error_Code;
 os_init_socket_system     ::        () -> bool;
 os_socket_create          ::        (ip_type: Socket_IP_Type, protocol: Socket_Protocol) -> OS_Socket;
@@ -142,3 +145,34 @@ OS_Dynamic_Library :: struct
 
     is_valid     :  bool;
 };
+
+// TODO(Sleepster): Add this to the allocator. 
+/////////////////
+// TICKET MUTEX
+/////////////////
+
+Ticket_Mutex :: struct
+{
+    serving    : u32;
+    next_ticket: u32;
+};
+
+tm_lock :: (mutex: *Ticket_Mutex) -> bool
+{
+    ticket_init     := mutex.next_ticket;
+    success, ticket := interlocked_compare_exchange(*mutex.next_ticket, ticket_init, ticket_init + 1);
+    if ticket == ticket_init
+    {
+        while ticket != mutex.serving
+        {
+        };
+    }
+
+    return success;
+}
+
+tm_unlock :: (mutex: *Ticket_Mutex)
+{
+    interlocked_increment(*mutex.serving);
+}
+

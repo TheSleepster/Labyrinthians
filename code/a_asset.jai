@@ -10,22 +10,22 @@ Asset_Slot :: struct
     slot_state: Asset_Slot_State;
     union
     {
-        texture_data: Texture2D;
-        sprite_data : Static_Sprite2D;
-        shader_data : GPU_Shader;
+        texture_data   : Texture2D;
+        sprite_data    : Static_Sprite2D;
+        shader_data    : GPU_Shader;
+        render_material: Render_Material;
     };
 };
 
 Asset_Manager :: struct
 {
-    asset_allocator: *Zone_Allocator;
-    hash_data_arena:  Memory_Arena;
-    shader_arena   :  Memory_Arena;
-    
-    atlas_builder  :  Atlas_Builder;
+    asset_allocator      : *Zone_Allocator;
+    hash_data_arena      :  Memory_Arena;
+    permanent_asset_arena:  Memory_Arena;
 
-    texture_hash   :  C_Hash_Table; 
-    shader_hash    :  C_Hash_Table;
+    master_atlas_builder :  Atlas_Builder;
+    texture_hash         :  C_Hash_Table; 
+    shader_hash          :  C_Hash_Table;
 };
 
 am_init :: () -> Asset_Manager
@@ -33,16 +33,16 @@ am_init :: () -> Asset_Manager
     stbi_set_flip_vertically_on_load(1);
     
     result: Asset_Manager;
-    result.asset_allocator = za_init(GB(1));
-    result.hash_data_arena = c_arena_init(MB(100));
-    result.shader_arena    = c_arena_init(MB(100));
-    result.texture_hash    = c_hash_table_create(*result.hash_data_arena, 512); 
-    result.shader_hash     = c_hash_table_create(*result.hash_data_arena, 256);
-    result.atlas_builder   = ab_init_atlas_builder(result.asset_allocator,
-                                                   ENGINE_TEXTURE_SIZE,
-                                                   ENGINE_TEXTURE_SIZE,
-                                                  .FORMAT_RGBA,
-                                                   true);
+    result.asset_allocator       = za_init(GB(1));
+    result.hash_data_arena       = c_arena_init(MB(100));
+    result.permanent_asset_arena = c_arena_init(MB(100));
+    result.texture_hash          = c_hash_table_create(*result.hash_data_arena, 512); 
+    result.shader_hash           = c_hash_table_create(*result.hash_data_arena, 256);
+    result.master_atlas_builder  = ab_init_atlas_builder(result.asset_allocator,
+                                                         ENGINE_TEXTURE_SIZE,
+                                                         ENGINE_TEXTURE_SIZE,
+                                                        .FORMAT_RGBA,
+                                                         true);
 
     if is_directory("../run_tree/res/textures")
     {
@@ -113,16 +113,16 @@ Bitmap_Format :: enum
 
 Bitmap :: struct
 {
-    data    :  *u8;
-    channels:   s32;
-    format  :   Bitmap_Format;
+    data    : *u8;
+    channels:  s32;
+    format  :  Bitmap_Format;
     
-    stride  :   s32;
-    width   :   s32;
-    height  :   s32;
+    stride  :  s32;
+    width   :  s32;
+    height  :  s32;
 
-    is_dirty:   bool;
-    is_valid:   bool;
+    is_dirty:  bool;
+    is_valid:  bool;
 };
 
 asset_init_bitmap :: (zone: *Zone_Allocator, width: s32, height: s32, format: Bitmap_Format) -> Bitmap
@@ -205,6 +205,34 @@ asset_get_texture :: (asset_manager: *Asset_Manager, hash_name: string) -> *Text
     return result;
 }
 
+asset_free_texture_bitmap_data :: (asset_manager: *Asset_Manager, hash_name: string)
+{
+    asset_slot := cast(*Asset_Slot)c_hash_get_value(*asset_manager.texture_hash, hash_name);
+    if asset_slot
+    {
+        texture_data := *asset_slot.texture_data;
+        if asset_slot.slot_state == .LOADED
+        {
+            assert(texture_data.bitmap.data != null);
+
+            asset_slot.slot_state = .UNLOADED;
+            za_free(asset_manager.asset_allocator, cast(**void)*texture_data.bitmap.data);
+
+            texture_data.bitmap = .{};
+        }
+        else
+        {
+            log("[ERROR]: Attempted to free texture data that doesn't exist on key: '%'...\n", hash_name);
+            assert(false);
+        }
+    }
+    else
+    {
+        log("[ERROR]: Texture with key '%' is not a valid key...\n", hash_name);
+        assert(false);
+    }
+}
+
 // TODO(Sleepster): Hey, is this no-initialize idea good? 
 asset_create_texture_from_bitmap :: (bitmap     : Bitmap,
                                      has_AA     : bool,
@@ -250,13 +278,13 @@ asset_get_sprite :: (asset_manager: *Asset_Manager, sprite_name: string, insert_
         texture := *texture_slot.texture_data;
         if texture.is_in_atlas == false
         {
-            result = ab_add_texture_to_builder_atlas(asset_manager, *asset_manager.atlas_builder, texture);
+            result = ab_add_texture_to_builder_atlas(asset_manager, *asset_manager.master_atlas_builder, texture);
         }
         else
         {
-            assert(asset_manager.atlas_builder.store_keys == true);
+            assert(asset_manager.master_atlas_builder.store_keys == true);
 
-            sprite := c_hash_get_value(*asset_manager.atlas_builder.atlas_texture.atlas_data.sprite_hash, sprite_name);
+            sprite := c_hash_get_value(*asset_manager.master_atlas_builder.atlas_texture.atlas_data.sprite_hash, sprite_name);
             assert(sprite != null);
 
             result = sprite;
@@ -297,7 +325,7 @@ asset_get_shader :: (asset_manager: *Asset_Manager, shader_name: string) -> *GPU
         shader := *asset_slot.shader_data;
         if shader.program_id == 0
         {
-            shader.* = compile_shader_source(*asset_manager.shader_arena, *shader.shader_source, shader.shader_type);
+            shader.* = compile_shader_source(*asset_manager.permanent_asset_arena, *shader.shader_source, shader.shader_type);
         }
         result = shader;
     }

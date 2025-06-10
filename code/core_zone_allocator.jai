@@ -31,35 +31,6 @@ za_print_block_list    :: (zone: *Zone_Allocator);
 za_validate_block_list :: (zone: *Zone_Allocator);
 */
 
-/////////////////
-// TICKET MUTEX
-/////////////////
-
-Ticket_Mutex :: struct
-{
-    serving    : u32;
-    next_ticket: u32;
-};
-
-tm_lock :: (mutex: *Ticket_Mutex) -> bool
-{
-    ticket_init     := mutex.next_ticket;
-    success, ticket := interlocked_compare_exchange(*mutex.next_ticket, ticket_init, ticket_init + 1);
-    if ticket == ticket_init
-    {
-        while ticket != mutex.serving
-        {
-        };
-    }
-
-    return success;
-}
-
-tm_unlock :: (mutex: *Ticket_Mutex)
-{
-    interlocked_increment(*mutex.serving);
-}
-
 ////////////////////
 // ZONE ALLOCATOR
 ////////////////////

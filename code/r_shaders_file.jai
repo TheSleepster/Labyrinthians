@@ -90,7 +90,6 @@ main()
     }
     DiffuseColor = DiffuseColor * vOutColor;
 
-    // TODO(Sleepster): Render Options for being unaffected by lights, and being unaffected by ambient light
     vec3  Normal       = vOutVSNormals;
     vec3  FragPos      = vOutFragPos.xyz;
     vec3  AmbientLight = vec3(uAmbientLighting);

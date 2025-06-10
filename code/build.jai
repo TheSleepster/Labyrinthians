@@ -12,6 +12,7 @@ build_release :: (workspace: Workspace)
     options.use_visual_studio_message_format = true;
     options.use_natvis_compatible_types      = true;
     options.dead_code_elimination            = .ALL;
+    options.enable_bytecode_inliner          = true;
 
     set_optimization(*options, .VERY_OPTIMIZED, false);
     set_build_options(options, workspace);
@@ -19,6 +20,8 @@ build_release :: (workspace: Workspace)
     compiler_begin_intercept(workspace);
     add_build_file("core_main.jai", workspace);
     compiler_end_intercept(workspace);
+
+    print("[RELEASE BUILD]\n\n");
 
     set_build_options_dc(.{do_output=false});
 }

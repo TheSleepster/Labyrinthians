@@ -3,9 +3,9 @@ TODO(Sleepster):
 - [x] Rendering Options
 - [x] Texturing
 - [x] Allow the renderer to support Point Lights
+- [x] add a "light_strength" field to point lights to brighten or dim the light
+- [x] remove the old 'Light_Attenuation_Data' field from the Point_Light 
 - [ ] render_options for allowing objects to remain unaffected by both ambient and point lights
-- [ ] add a "light_strength" field to point lights to brighten or dim the light
-- [ ] remove the old 'Light_Attenuation_Data' field from the Point_Light 
 - [ ] Rendering Lines  
 - [ ] Functions like 'draw_quad_xform()' that would allow XForm placement
 - [ ] Resize matrices when the window changes size
@@ -160,9 +160,7 @@ Render_State :: struct
     primary_vbo_id   : u32;
     primary_ebo_id   : u32;
 
-    test_shader      : GPU_Shader;
-    test_shader_projection_matrix: s32;
-    test_shader_view_matrix      : s32;
+    forward_plus_depth_fbo_id: u32;
 
     draw_frame_arena : Memory_Arena;
     render_data_arena: Memory_Arena;
@@ -696,10 +694,6 @@ r_init_renderer_data :: (window: *SDL_Window) -> Render_State
             glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, 0);
         }
     }
-
-    render_state.test_shader = compile_shader_source(*render_state.render_data_arena,
-                                                     *BASIC_SHADER_SOURCE_TEXT,
-                                                     .PIXEL);
 
     return render_state;
 }
