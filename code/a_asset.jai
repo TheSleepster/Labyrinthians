@@ -75,7 +75,7 @@ am_init :: () -> Asset_Manager
 
     asset_add_shader_to_hash(*result, BASIC_SHADER_SOURCE_TEXT, "Basic_Shader", .PIXEL);
 
-    default_material: Render_Material;
+    default_material: *Render_Material = c_arena_push_struct(*result.permanent_asset_arena, Render_Material);
     default_material.ambient_color  = .{1, 1, 1, 1};
     default_material.specular_color = .{1, 1, 1, 1};
     default_material.shine_color    = .{1, 1, 1, 1};
@@ -83,7 +83,7 @@ am_init :: () -> Asset_Manager
     default_material.ambient_strength  = 128.0;
     default_material.specular_strength = 128.0;
     default_material.shine_strength    = 128.0;
-    asset_add_render_material_to_hash(*result, *default_material, "Default_Material");
+    asset_add_render_material_to_hash(*result, default_material, "Default_Material");
 
     return result;
 }

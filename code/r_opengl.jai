@@ -159,7 +159,7 @@ Render_State :: struct
     draw_frame       : Draw_Frame;
 };
 
-gl_update_shader_buffer :: inline (location: u32, size: s64, data: *void)
+gl_update_SSBO :: inline (location: u32, size: s64, data: *void)
 {
     assert(data != null);
     assert(size != 0);
@@ -167,6 +167,16 @@ gl_update_shader_buffer :: inline (location: u32, size: s64, data: *void)
     glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 0, location);
     glBufferSubData(GL_SHADER_STORAGE_BUFFER, 0, size, data);
     glBindBuffer(GL_SHADER_STORAGE_BUFFER, 0);
+}
+
+gl_update_UBO :: inline (location: u32, size: s64, data: *void)
+{
+    assert(data != null);
+    assert(size != 0);
+
+    glBindBufferBase(GL_UNIFORM_BUFFER, 0, location);
+    glBufferSubData(GL_UNIFORM_BUFFER, 0, size, data);
+    glBindBuffer(GL_UNIFORM_BUFFER, 0);
 }
 
 gl_update_integer_uniform :: inline (location: s32, data: *void)
@@ -249,7 +259,7 @@ gl_shader_storage_buffer_object_update_buffer :: (shader: *GPU_Shader, buffer_na
     {
         shader_buffer.buffer_data   = data;
         shader_buffer.buffer_size   = size;
-        shader_buffer.update_buffer = gl_update_shader_buffer;
+        shader_buffer.update_buffer = gl_update_SSBO;
     }
     else
     {
@@ -273,7 +283,7 @@ gl_shader_UBO_update_buffer :: (shader: *GPU_Shader, buffer_name: string, data: 
     if shader_buffer
     {
         shader_buffer.buffer_data   = data;
-        shader_buffer.update_buffer = gl_update_shader_buffer;
+        shader_buffer.update_buffer = gl_update_UBO;
     }
     else
     {
@@ -911,6 +921,16 @@ r_render_group_test_render :: (render_state: *Render_State, asset_manager: *Asse
                     }
                 }
             }
+        }
+
+        for ubo_index: 0..shader.UBO_buffer_data.count - 1
+        {
+            UBO_data := *shader.UBO_buffer_data[ubo_index];
+            assert(UBO_data.buffer_binding != -1);
+            assert(UBO_data.update_buffer  != null);
+            UBO_data.update_buffer(UBO_data.location_id,
+                                   UBO_data.buffer_size,
+                                   UBO_data.buffer_data);
         }
 
         for buffer_index: 0..shader.SBO_buffer_data.count - 1
