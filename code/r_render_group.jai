@@ -66,9 +66,35 @@ Render_Group :: struct
     stored_render_layer:  u32;
     view_matrix        :  Matrix4;
     projection_matrix  :  Matrix4;
-    material           : *Render_Material;
+    bound_material     : *Render_Material;
     bound_shader       : *GPU_Shader;
 };
+
+r_create_new_render_group :: (render_state           : *Render_State,
+                              render_group_hash_table: []*Render_Group,
+                              working_quad           : *Render_Quad,
+                              hash_value             : s64) -> *Render_Group
+{
+    hash_render_group := c_arena_push_struct(*render_state.draw_frame_arena, Render_Group);
+    render_group_hash_table[hash_value] = hash_render_group;
+
+    draw_frame := *render_state.draw_frame;
+    hash_render_group.* = .{};
+    hash_render_group.view_matrix         = draw_frame.used_view_matrices[working_quad.quad_render_matrix_id];
+    hash_render_group.projection_matrix   = draw_frame.used_projection_matrices[working_quad.quad_render_matrix_id];
+    hash_render_group.bound_shader        = working_quad.required_shader;
+    hash_render_group.stored_render_layer = working_quad.render_layer;
+    hash_render_group.bound_material      = working_quad.required_render_material;
+
+    // TODO(Sleepster): Is this an issue??? Likely not. It's only 150KB per MAX_QUADS...
+    hash_render_group.quad_render_buffer = c_arena_push_array(*render_state.draw_frame_arena, Render_Quad, MAX_QUADS);
+    hash_render_group.group_id           = xx hash_value;
+
+    render_state.draw_frame.render_groups[draw_frame.render_group_counter] = hash_render_group;
+    render_state.draw_frame.render_group_counter += 1;
+
+    return hash_render_group;
+}
 
 r_get_render_group_quad_buffer :: (render_state: *Render_State) -> *Render_Group_Quad_Buffer
 {
@@ -104,10 +130,12 @@ r_get_render_group_quad_buffer :: (render_state: *Render_State) -> *Render_Group
     return current_buffer;
 }
 
-r_hash_quad_value :: (shader_id: u32, pass_id: u32, render_layer: u32, max_entries: u64) -> s64
+r_hash_quad_value :: (shader_id: u32, pass_id: u32, render_layer: u32, render_material_ptr: *u32, max_entries: u64) -> s64
 {
     hash     : u64 = 14695981039346656037; 
     fnv_prime: u64 = 1099511628211;
+
+    mat_value := render_material_ptr.*;
 
     hash = hash ^ cast(u64)render_layer;
     hash = hash * fnv_prime;
@@ -116,6 +144,9 @@ r_hash_quad_value :: (shader_id: u32, pass_id: u32, render_layer: u32, max_entri
     hash = hash * fnv_prime;
 
     hash = hash ^ cast(u64)pass_id;
+    hash = hash * fnv_prime;
+
+    hash = hash ^ cast(u64)mat_value;
     hash = hash * fnv_prime;
 
     return xx((hash % max_entries + max_entries) % max_entries);
@@ -134,7 +165,7 @@ add_texture_to_render_group_list :: (render_group: *Render_Group, texture_id: u3
 }
 
 // IMPORTANT(Sleepster): PRIME NUMBER 
-MAX_RENDER_GROUPS :: 1024;
+MAX_RENDER_GROUPS :: 1021;
 
 // NOTE(Sleepster): This function is used to work to set up the amount of render groups we need
 r_handle_group_buffers :: (render_state: *Render_State)
@@ -168,7 +199,7 @@ r_handle_group_buffers :: (render_state: *Render_State)
                    sorting_buffer2.data,
                 xx current_quad_buffer.quad_count,
                    size_of(Render_Quad), 
-                xx offset_of(Render_Quad, #code render_pass_id),
+                xx offset_of(Render_Quad, #code quad_render_matrix_id),
                    8);
 
         radix_sort(current_quad_buffer.quad_buffer.data,
@@ -198,18 +229,6 @@ r_handle_group_buffers :: (render_state: *Render_State)
         c_arena_end_temporary_memory(*scratch_buffer);
         current_quad_buffer = current_quad_buffer.next_buffer;
     }
-
-    // TODO(Sleepster): What happens when a group reaches the MAX_QUADS??? How do we fix that for the next_render_group
-/*
-    IDEA:
-
-    When we reach "MAX_QUADS" we can just set the pointer to the
-    current hash index in the hash table to null, but keep it's data
-    pointer in the large array. Allowing us to create an identically
-    hashed render_group with the same properties while maintaining the
-    core logic this function needs.
-*/
-
     
     current_quad_buffer = *draw_frame.quad_buffers;
     while current_quad_buffer != null
@@ -218,27 +237,17 @@ r_handle_group_buffers :: (render_state: *Render_State)
         {
             working_quad := *current_quad_buffer.quad_buffer[quad_index];
             hash_value   := r_hash_quad_value(working_quad.required_shader.program_id,
-                                              working_quad.render_pass_id,
+                                              working_quad.quad_render_matrix_id,
                                               working_quad.render_layer,
+                                              cast(*u32)working_quad.required_render_material,
                                               MAX_RENDER_GROUPS);
             hash_render_group: *Render_Group = render_group_hash_table[hash_value];
             if hash_render_group == null
             {
-                hash_render_group = c_arena_push_struct(*render_state.draw_frame_arena, Render_Group);
-                render_group_hash_table[hash_value] = hash_render_group;
-
-                hash_render_group.* = .{};
-                hash_render_group.view_matrix         = draw_frame.used_view_matrices[working_quad.render_pass_id];
-                hash_render_group.projection_matrix   = draw_frame.used_projection_matrices[working_quad.render_pass_id];
-                hash_render_group.bound_shader        = working_quad.required_shader;
-                hash_render_group.stored_render_layer = working_quad.render_layer;
-
-                // TODO(Sleepster): Is this an issue??? Likely not. It's only 150KB per MAX_QUADS...
-                hash_render_group.quad_render_buffer = c_arena_push_array(*render_state.draw_frame_arena, Render_Quad, MAX_QUADS);
-                hash_render_group.group_id           = xx hash_value;
-
-                render_state.draw_frame.render_groups[draw_frame.render_group_counter] = hash_render_group;
-                render_state.draw_frame.render_group_counter += 1;
+                hash_render_group = r_create_new_render_group(render_state,
+                                                              render_group_hash_table,
+                                                              working_quad,
+                                                              hash_value);
             }
             assert(hash_render_group.group_id != 0 &&
                    hash_render_group.group_id == hash_value);
@@ -248,8 +257,21 @@ r_handle_group_buffers :: (render_state: *Render_State)
                 add_texture_to_render_group_list(hash_render_group, working_quad.required_texture_id);
             }
 
-            hash_render_group.quad_render_buffer[hash_render_group.current_quad_count] = working_quad.*;
-            hash_render_group.current_quad_count += 1;
+            if hash_render_group.current_quad_count + 1 >= MAX_QUADS
+            {
+                assert(hash_render_group != null);
+                hash_render_group = null;
+
+                hash_render_group = r_create_new_render_group(render_state,
+                                                              render_group_hash_table,
+                                                              working_quad,
+                                                              hash_value);
+            }
+            else
+            {
+                hash_render_group.quad_render_buffer[hash_render_group.current_quad_count] = working_quad.*;
+                hash_render_group.current_quad_count += 1;
+            }
         }
 
         current_quad_buffer = current_quad_buffer.next_buffer;

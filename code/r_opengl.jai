@@ -21,6 +21,8 @@ MAX_RENDER_PASSES   :: 32;
 MAX_LIGHTS          :: 2048;
 ENGINE_TEXTURE_SIZE :: 2048;
 
+r_default_render_material: *Render_Material;
+
 // NOTE(Sleepster): VS = view space 
 Point_Light :: struct
 {
@@ -47,18 +49,6 @@ Vertex :: struct
     vTexelData    : Vector2;
     vRenderOptions: u32;
     vTextureIndex : u32;
-}#no_padding;
-
-Render_Material :: struct
-{
-    ambient_color     : Vector4;
-    specular_color    : Vector4;
-    shine_color       : Vector4;
-
-    ambient_strength  : float32;
-    specular_strength : float32;
-    shine_strength    : float32;
-    __padding         : float32;
 }#no_padding;
 
 Shader_Uniform_Type :: enum
@@ -119,9 +109,11 @@ GPU_Shader :: struct
 
     update_buffer  : (shader: *GPU_Shader, buffer_name : string, size: s64, data: *void);
     update_uniform : (shader: *GPU_Shader, uniform_name: string, data: *void);
+    update_UBO     : (shader: *GPU_Shader, UBO_name    : string, data: *void);
 
     uniform_data   : []GPU_Shader_Uniform;
-    buffer_data    : []GPU_Shader_Buffer;
+    UBO_buffer_data: []GPU_Shader_Buffer;
+    SBO_buffer_data: []GPU_Shader_Buffer;
     sampler_data   : []GPU_Shader_Sampler;
 };
 
@@ -132,7 +124,7 @@ Draw_Frame :: struct
 
     previous_view_matrix      :   Matrix4;
     previous_projection_matrix:   Matrix4;
-    pass_count                :   u32;
+    current_render_matrix_id  :   u32;
 
     bound_texture_counter     :   u32; 
 
@@ -241,10 +233,10 @@ gl_update_float_mat4_uniform :: inline (location: s32, data: *void)
     glUniformMatrix4fv(location, 1, GL_FALSE, *value._11);
 }
 
-gl_shader_update_buffer :: (shader: *GPU_Shader, buffer_name: string, size: s64, data: *void)
+gl_shader_storage_buffer_object_update_buffer :: (shader: *GPU_Shader, buffer_name: string, size: s64, data: *void)
 {
     shader_buffer: *GPU_Shader_Buffer;
-    for *buffer: shader.buffer_data
+    for *buffer: shader.SBO_buffer_data
     {
         if compare_strings(buffer_name, buffer.buffer_name) == 0
         {
@@ -257,6 +249,30 @@ gl_shader_update_buffer :: (shader: *GPU_Shader, buffer_name: string, size: s64,
     {
         shader_buffer.buffer_data   = data;
         shader_buffer.buffer_size   = size;
+        shader_buffer.update_buffer = gl_update_shader_buffer;
+    }
+    else
+    {
+        log_error("Invalid shader buffer name... name is: %...\n", buffer_name);
+        assert(false);
+    }
+}
+
+gl_shader_UBO_update_buffer :: (shader: *GPU_Shader, buffer_name: string, data: *void)
+{
+    shader_buffer: *GPU_Shader_Buffer;
+    for *buffer: shader.UBO_buffer_data
+    {
+        if compare_strings(buffer_name, buffer.buffer_name) == 0
+        {
+            shader_buffer = buffer;
+            break;
+        }
+    }
+
+    if shader_buffer
+    {
+        shader_buffer.buffer_data   = data;
         shader_buffer.update_buffer = gl_update_shader_buffer;
     }
     else
@@ -427,7 +443,8 @@ compile_shader_source :: (arena: *Memory_Arena, source: *string, type: GPU_Shade
     shader.shader_type    = type;
     shader.shader_source  = source.*;
     shader.update_uniform = gl_shader_update_uniform;
-    shader.update_buffer  = gl_shader_update_buffer;
+    shader.update_buffer  = gl_shader_storage_buffer_object_update_buffer;
+    shader.update_UBO     = gl_shader_UBO_update_buffer;
     if shader.shader_type ==
     {
         case .PIXEL;
@@ -447,6 +464,33 @@ compile_shader_source :: (arena: *Memory_Arena, source: *string, type: GPU_Shade
 
     if shader.program_id != 0
     {
+        // SHADER UNIFORM BUFFER OBJECTS
+        {
+            shader_UBO_count: s32;
+            glGetProgramiv(shader.program_id, GL_ACTIVE_UNIFORM_BLOCKS, *shader_UBO_count);
+            if shader_UBO_count > 0
+            {
+                shader.UBO_buffer_data = c_arena_push_array(arena, GPU_Shader_Buffer, xx shader_UBO_count);
+                for UBO_index: 0..shader.UBO_buffer_data.count - 1
+                {
+                    UBO_data := *shader.UBO_buffer_data[UBO_index];
+
+                    glGetActiveUniformBlockiv(shader.program_id, xx UBO_index, GL_UNIFORM_BLOCK_NAME_LENGTH, cast(*s32)*UBO_data.buffer_name.count);
+                    UBO_data.buffer_name.count -= 1;
+                    UBO_data.buffer_name.data   = c_arena_push_size(arena, size_of(u8) * xx(UBO_data.buffer_name.count + 1));
+                    glGetActiveUniformBlockName(shader.program_id, xx UBO_index, xx(UBO_data.buffer_name.count + 1), null, UBO_data.buffer_name.data);
+
+                    glGetActiveUniformBlockiv(shader.program_id, xx UBO_index, GL_UNIFORM_BLOCK_DATA_SIZE, cast(*s32)*UBO_data.buffer_size);
+                    glGetActiveUniformBlockiv(shader.program_id, xx UBO_index, GL_UNIFORM_BLOCK_BINDING,   cast(*s32)*UBO_data.buffer_binding);
+
+                    glGenBuffers(1, *UBO_data.location_id);
+                    glBindBuffer(GL_UNIFORM_BUFFER, UBO_data.location_id);
+                    glBufferData(GL_UNIFORM_BUFFER, UBO_data.buffer_size, null, GL_DYNAMIC_DRAW);
+                    glBindBuffer(GL_UNIFORM_BUFFER, 0);
+                }
+            }
+        }
+        
         // SHADER UNIFORMS
         {
             shader_uniform_count: s32;
@@ -454,9 +498,10 @@ compile_shader_source :: (arena: *Memory_Arena, source: *string, type: GPU_Shade
             if shader_uniform_count > 0
             {
                 shader.uniform_data = c_arena_push_array(arena, GPU_Shader_Uniform, xx shader_uniform_count);
+                true_uniform_index: s32;
                 for uniform_index: 0..shader.uniform_data.count - 1
                 {
-                    uniform := *shader.uniform_data[uniform_index];
+                    uniform := *shader.uniform_data[true_uniform_index];
                     
                     buffer: [256]u8;
                     length: u32;
@@ -470,11 +515,20 @@ compile_shader_source :: (arena: *Memory_Arena, source: *string, type: GPU_Shade
                     memcpy(uniform.uniform_name.data, buffer.data, length * size_of(u8));
 
                     uniform.location_id = glGetUniformLocation(shader.program_id, temp_c_string(uniform.uniform_name));
+                    if uniform.location_id != -1
+                    {
+                        true_uniform_index += 1;
+                    }
+                    else
+                    {
+                        log("[INFO]: Skipping uniform '%' as it is a member of a UBO...\n", uniform.uniform_name);
+                        uniform.* = .{};
+                    }
                 }
             }
         }
 
-        // SHADER BUFFERS
+        // SHADER STORAGE BUFFERS
         {
             shader_storage_buffer_count: s32;
             glGetProgramInterfaceiv(shader.program_id,
@@ -483,10 +537,10 @@ compile_shader_source :: (arena: *Memory_Arena, source: *string, type: GPU_Shade
                                    *shader_storage_buffer_count);
             if shader_storage_buffer_count != 0
             {
-                shader.buffer_data = c_arena_push_array(arena, GPU_Shader_Buffer, xx shader_storage_buffer_count);
-                for GPU_buffer_index: 0..shader.buffer_data.count - 1
+                shader.SBO_buffer_data = c_arena_push_array(arena, GPU_Shader_Buffer, xx shader_storage_buffer_count);
+                for GPU_buffer_index: 0..shader.SBO_buffer_data.count - 1
                 {
-                    current_buffer := *shader.buffer_data[GPU_buffer_index];
+                    current_buffer := *shader.SBO_buffer_data[GPU_buffer_index];
                     buffer: [256]u8;
                     length: u32;
                     glGetProgramResourceName(shader.program_id,
@@ -604,7 +658,7 @@ r_update_gpu_texture_from_bitmap :: (texture: *Texture2D) -> bool
     return true;
 }
 
-r_init_renderer_data :: (window: *SDL_Window) -> Render_State
+r_init_renderer_data :: (window: *SDL_Window, asset_manager: *Asset_Manager) -> Render_State
 {
     // NOTE(Sleepster): GL State Init 
     {
@@ -695,12 +749,15 @@ r_init_renderer_data :: (window: *SDL_Window) -> Render_State
         }
     }
 
+    r_default_render_material = asset_get_render_material(asset_manager, "Default_Material");
+
     return render_state;
 }
 
 #no_reset uploaded_debug_texture: bool = false;
 r_render_group_test_render :: (render_state: *Render_State, asset_manager: *Asset_Manager)
 {
+    render_state.draw_frame.active_render_material = r_default_render_material;
     render_state.draw_frame.point_light_buffer = c_arena_push_array(*render_state.draw_frame_arena, Point_Light, 50);
 
     render_state.draw_frame.active_shader            = asset_get_shader(asset_manager, "Basic_Shader");
@@ -740,6 +797,16 @@ r_render_group_test_render :: (render_state: *Render_State, asset_manager: *Asse
     r_draw_quad(render_state,   .{-200, -125}, .{ 50,  50}, .{1, 0, 0, 0.8});
     r_draw_quad(render_state,   .{-175, -125}, .{ 50,  50}, .{0, 0, 1, 0.8});
 
+    // for 0..10000
+    // {
+    //     r_draw_quad(render_state,   .{-175, -125}, .{ 50,  50}, .{0, 0, 1, 0.8});
+    // }
+
+    // for 0..10000
+    // {
+    //     r_draw_quad(render_state,   .{-200, -150}, .{100, 100}, .{1, 0, 1, 1},   texture.texID, .RO_NONE, deg_to_rad(33));
+    // }
+
     light := r_create_point_light(render_state, .{250, 0}, .{0.30, 0.30, 0.30, 1.0}, .{1, 0}, deg_to_rad(360), 500, 2.0);
     
     glStencilOp(GL_KEEP, GL_KEEP, GL_REPLACE);  
@@ -771,11 +838,13 @@ r_render_group_test_render :: (render_state: *Render_State, asset_manager: *Asse
         working_group.bound_shader.update_uniform(working_group.bound_shader,
                                                   "uAmbientLighting",
                                                  *ambient_factor);
-
         working_group.bound_shader.update_buffer(working_group.bound_shader,
                                                  "PointLightSBO",
                                                  size_of(Point_Light) * render_state.draw_frame.point_light_count,
                                                  render_state.draw_frame.point_light_buffer.data);
+        working_group.bound_shader.update_UBO(working_group.bound_shader,
+                                              "uMaterial",
+                                              working_group.bound_material);
 
         opaque_quad_count := working_group.current_quad_count - working_group.t_quad_count;
         glBindBuffer(GL_ARRAY_BUFFER, render_state.primary_vbo_id);
@@ -844,9 +913,9 @@ r_render_group_test_render :: (render_state: *Render_State, asset_manager: *Asse
             }
         }
 
-        for buffer_index: 0..shader.buffer_data.count - 1
+        for buffer_index: 0..shader.SBO_buffer_data.count - 1
         {
-            shader_buffer := *shader.buffer_data[buffer_index];
+            shader_buffer := *shader.SBO_buffer_data[buffer_index];
             assert(shader_buffer.buffer_binding != -1);
             assert(shader_buffer.update_buffer  != null);
             shader_buffer.update_buffer(shader_buffer.location_id,

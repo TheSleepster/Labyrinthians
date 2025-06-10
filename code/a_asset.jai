@@ -26,6 +26,7 @@ Asset_Manager :: struct
     master_atlas_builder :  Atlas_Builder;
     texture_hash         :  C_Hash_Table; 
     shader_hash          :  C_Hash_Table;
+    render_material_hash :  C_Hash_Table;
 };
 
 am_init :: () -> Asset_Manager
@@ -36,8 +37,9 @@ am_init :: () -> Asset_Manager
     result.asset_allocator       = za_init(GB(1));
     result.hash_data_arena       = c_arena_init(MB(100));
     result.permanent_asset_arena = c_arena_init(MB(100));
-    result.texture_hash          = c_hash_table_create(*result.hash_data_arena, 512); 
-    result.shader_hash           = c_hash_table_create(*result.hash_data_arena, 256);
+    result.texture_hash          = c_hash_table_create(*result.hash_data_arena, 509); 
+    result.shader_hash           = c_hash_table_create(*result.hash_data_arena, 257);
+    result.render_material_hash  = c_hash_table_create(*result.hash_data_arena, 257);
     result.master_atlas_builder  = ab_init_atlas_builder(result.asset_allocator,
                                                          ENGINE_TEXTURE_SIZE,
                                                          ENGINE_TEXTURE_SIZE,
@@ -72,6 +74,16 @@ am_init :: () -> Asset_Manager
     }
 
     asset_add_shader_to_hash(*result, BASIC_SHADER_SOURCE_TEXT, "Basic_Shader", .PIXEL);
+
+    default_material: Render_Material;
+    default_material.ambient_color  = .{1, 1, 1, 1};
+    default_material.specular_color = .{1, 1, 1, 1};
+    default_material.shine_color    = .{1, 1, 1, 1};
+
+    default_material.ambient_strength  = 128.0;
+    default_material.specular_strength = 128.0;
+    default_material.shine_strength    = 128.0;
+    asset_add_render_material_to_hash(*result, *default_material, "Default_Material");
 
     return result;
 }
@@ -332,6 +344,51 @@ asset_get_shader :: (asset_manager: *Asset_Manager, shader_name: string) -> *GPU
     else
     {
         log("[ERROR]: Shader by the name of '%' was not found...\n", shader_name);
+    }
+
+    return result;
+}
+
+/////////////////////
+// RENDER_MATERIALS
+/////////////////////
+
+Render_Material :: struct
+{
+    ambient_color     : Vector4;
+    specular_color    : Vector4;
+    shine_color       : Vector4;
+
+    ambient_strength  : float32;
+    specular_strength : float32;
+    shine_strength    : float32;
+    __padding         : float32;
+}#no_padding;
+
+Render_Material_Data :: struct 
+{
+    material_name: string;
+    material     : Render_Material;
+}
+
+asset_add_render_material_to_hash :: inline (asset_manager: *Asset_Manager,
+                                             material_data: *Render_Material,
+                                             hash_name    : string)
+{
+    c_hash_insert_pair(*asset_manager.render_material_hash, hash_name, material_data);
+}
+
+asset_get_render_material :: (asset_manager: *Asset_Manager, hash_name: string) -> *Render_Material
+{
+    result: *Render_Material;
+    asset_slot := cast(*Asset_Slot)c_hash_get_value(*asset_manager.render_material_hash, hash_name);
+    if asset_slot
+    {
+        result = *asset_slot.render_material;
+    }
+    else
+    {
+        log("[ERROR]: A material by the name of '%' is not a valid entry...\n", hash_name);
     }
 
     return result;

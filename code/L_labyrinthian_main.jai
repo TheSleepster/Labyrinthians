@@ -40,7 +40,7 @@ L_labyrinthian_main :: ()
         asset_manager := am_init();
 
         input_manager: Input_Manager;
-        render_state  := r_init_renderer_data(window);
+        render_state := r_init_renderer_data(window, *asset_manager);
 
         is_running := true;
         while is_running
@@ -60,54 +60,3 @@ L_labyrinthian_main :: ()
         log_error("[ERROR]: SDL_CreateWindow has failed with error: %...\n", SDL_GetError());
     }
 }
-
-// typedef struct vertex_t
-// {
-//     vec2 NDC_Position;
-//     vec2 TexelCoords;
-//     vec4 RenderColor;
-
-//     int MaterialIndex;
-//     int TextureIndex;
-// }vertex;
-
-// typedef struct render_material_t
-// {
-//     float Reflectivity;
-//     float Opacity;
-//     float IlluminationValue;
-// }render_material;
-
-// typedef enum primitive_type_t
-// {
-//     QUAD,
-//     TRIANGLE,
-//     LINE,
-// }primitive_type;
-
-// typedef struct render_quad_t
-// {
-//     union
-//     {
-//         vertex Elements[4];
-//         struct
-//         {
-//             vertex TopLeft;
-//             vertex TopRight;
-//             vertex BottomLeft;
-//             vertex TopLeft;
-//         };
-//     };
-
-//     primitive_type Type;
-    
-//     vec2 WorldPosition;
-//     vec2 TexelData;
-//     vec4 RenderColor;
-
-//     uint32 RequiredTexture;
-//     uint32 BoundTextureIndex;
-//     uint32 RenderLayer;
-// }render_quad;
-
-

@@ -1,21 +1,21 @@
 // NOTE(Sleepster): Rotation is stored as degrees, used as radians 
 Render_Primitive_Data :: struct
 {
-    world_position     : Vector2;
-    render_size        : Vector2;
-    render_color       : Vector4;
-    rotation           : float32;
-    is_transparent     : s32;
+    world_position          : Vector2;
+    render_size             : Vector2;
+    render_color            : Vector4;
+    rotation                : float32;
+    is_transparent          : s32;
 
     // NOTE(Sleepster): These are unique to the rendergroup 
-    render_pass_id     : u32;
-    required_shader_id : u32;
-    render_layer       : u32;
-    required_texture_id: u32;
-    render_texture_idx : u32;
+    quad_render_matrix_id   : u32;
+    required_shader_id      : u32;
+    render_layer            : u32;
+    required_texture_id     : u32;
+    render_texture_idx      : u32;
 
-    required_shader    : *GPU_Shader;
-    required_material  : *Render_Material;
+    required_shader         : *GPU_Shader;
+    required_render_material: *Render_Material;
 };
 
 Render_Line :: struct
@@ -88,7 +88,7 @@ r_create_draw_quad :: (render_state  : *Render_State,
     if (render_state.draw_frame.active_view_matrix       != render_state.draw_frame.previous_view_matrix) ||
        (render_state.draw_frame.active_projection_matrix != render_state.draw_frame.previous_projection_matrix)
     {
-        count := render_state.draw_frame.pass_count;
+        count := render_state.draw_frame.current_render_matrix_id;
 
         render_state.draw_frame.used_projection_matrices[count] = render_state.draw_frame.active_projection_matrix;
         render_state.draw_frame.used_view_matrices[count]       = render_state.draw_frame.active_view_matrix;
@@ -96,11 +96,13 @@ r_create_draw_quad :: (render_state  : *Render_State,
         render_state.draw_frame.previous_view_matrix            = render_state.draw_frame.active_view_matrix;
         render_state.draw_frame.previous_projection_matrix      = render_state.draw_frame.active_projection_matrix;
 
-        render_state.draw_frame.pass_count += 1;
+        render_state.draw_frame.current_render_matrix_id += 1;
     }
-    quad.render_pass_id     =  render_state.draw_frame.pass_count - 1;
-    quad.required_shader    =  render_state.draw_frame.active_shader;
-    quad.required_shader_id =  quad.required_shader.program_id;
+
+    quad.quad_render_matrix_id    =  render_state.draw_frame.current_render_matrix_id - 1;
+    quad.required_shader          =  render_state.draw_frame.active_shader;
+    quad.required_render_material =  render_state.draw_frame.active_render_material;
+    quad.required_shader_id       =  quad.required_shader.program_id;
 
     top    := position.y;
     bottom := position.y + render_size.y;

@@ -51,9 +51,21 @@ layout(std140, binding = 0) buffer PointLightSBO
     point_light PointLights[];
 };
 
-uniform int       uPointLightCount;
-uniform float     uAmbientLighting;
-uniform sampler2D uAtlasArray[16];
+uniform int             uPointLightCount;
+uniform float           uAmbientLighting;
+uniform sampler2D       uAtlasArray[16];
+
+layout(std140, binding = 1) uniform uMaterial
+{
+    vec4  AmbientColor;
+    vec4  SpecularColor;
+    vec4  ShineColor;
+
+    float AmbientStrength;
+    float SpecularStrength;
+    float ShineStrength;
+    float padding;
+}Material;
 
 layout(location = 0)      in vec4 vOutColor;
 layout(location = 1)      in vec2 vOutTexelData;
@@ -114,7 +126,15 @@ main()
         float CurrentStep = floor((1.0 - (LightDist / Light.Radius)) * MaxSteps) / MaxSteps;
         float Attenuation = CurrentStep * (1.0 - (LightDist / Light.Radius));
 
-        float Shine = 128.0;
+        float Shine = 0.0;
+        if(Material.ShineStrength == 0.0)
+        {
+            Shine = 128;
+        }
+        else
+        {
+            Shine = Material.ShineStrength;
+        }
         float SpecularLighting = pow(max(dot(Normal, ReflectDir), 0.0), Shine);
         vec3  AdditiveLighting = Light.Color.rgb * Attenuation;
 
