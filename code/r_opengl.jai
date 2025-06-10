@@ -159,7 +159,7 @@ Render_State :: struct
     // NOTE(Sleepster): LIGHTMAP 
     lighting_fbo_id                : u32;
     lighting_fbo_texture_id        : u32;
-    lighting_fbo_stencil_buffer_id : u32;
+    lighting_rbo_stencil_buffer_id : u32;
 
     draw_frame_arena : Memory_Arena;
     render_data_arena: Memory_Arena;
@@ -786,10 +786,10 @@ r_init_renderer_data :: (window: *SDL_Window, asset_manager: *Asset_Manager) -> 
             color_attachments: GLenum = GL_COLOR_ATTACHMENT0;
             glDrawBuffers(1, *color_attachments);
 
-            glGenRenderbuffers(1, *render_state.lighting_fbo_stencil_buffer_id);
-            glBindRenderbuffer(GL_RENDERBUFFER, render_state.lighting_fbo_stencil_buffer_id);
+            glGenRenderbuffers(1, *render_state.lighting_rbo_stencil_buffer_id);
+            glBindRenderbuffer(GL_RENDERBUFFER, render_state.lighting_rbo_stencil_buffer_id);
             glRenderbufferStorage(GL_RENDERBUFFER, GL_DEPTH_COMPONENT, 1920, 1080);
-            glFramebufferRenderbuffer(GL_FRAMEBUFFER, GL_DEPTH_ATTACHMENT, GL_RENDERBUFFER, render_state.lighting_fbo_stencil_buffer_id);
+            glFramebufferRenderbuffer(GL_FRAMEBUFFER, GL_DEPTH_ATTACHMENT, GL_RENDERBUFFER, render_state.lighting_rbo_stencil_buffer_id);
 
             glBindFramebuffer(GL_FRAMEBUFFER, 0);
             glBindRenderbuffer(GL_RENDERBUFFER, 0);
@@ -855,7 +855,7 @@ r_render_group_test_render :: (render_state: *Render_State, asset_manager: *Asse
     //     r_draw_quad(render_state,   .{-200, -150}, .{100, 100}, .{1, 0, 1, 1},   texture.texID, .RO_NONE, deg_to_rad(33));
     // }
 
-    light  := r_create_point_light(render_state, .{ 250, 0}, .{0.30, 0.30, 0.30, 1.0}, .{1, 0},  deg_to_rad(45), 500, 1.0);
+    light  := r_create_point_light(render_state, .{ 250, 0}, .{0.30, 0.30, 0.30, 1.0}, .{-1, 0},  deg_to_rad(45), 500, 1.0);
     light2 := r_create_point_light(render_state, .{-250, 0}, .{0.30, 0.30,  0.30, 1.0}, .{1, 0}, deg_to_rad(180), 500, 1.0);
     
     glStencilOp(GL_KEEP, GL_KEEP, GL_REPLACE);  
@@ -869,8 +869,7 @@ r_render_group_test_render :: (render_state: *Render_State, asset_manager: *Asse
 
     glBindVertexArray(render_state.primary_vao_id);
 
-    ambient_factor: float32 = 0.4;
-
+    ambient_factor: float32 = 0.1;
     r_handle_group_buffers(render_state);
     for group_index: 0..render_state.draw_frame.render_group_counter - 1
     {
