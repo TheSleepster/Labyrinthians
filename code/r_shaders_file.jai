@@ -109,40 +109,47 @@ main()
     const float TileSize = 16.0;
     vec3 TotalLighting = vec3(0);
     vec3 Specular      = vec3(0);
-    for(uint LightIndex = 0;
-        LightIndex < uPointLightCount;
-        ++LightIndex)
+    if((vOutRenderingOptions & RO_UNLIT) == 0)
     {
-        point_light Light   = PointLights[LightIndex];
-        vec2 FragTilePos    = floor(FragPos.xy / TileSize) * TileSize + TileSize * 0.5;
-        vec3 SnappedFragPos = vec3(FragTilePos, FragPos.z);
-
-        vec3  LightDir   = normalize(vec3(Light.vsPosition, 0.0) - SnappedFragPos);
-        vec3  ReflectDir = reflect(-LightDir, Normal);
-        float LightDist  = length(vec3(Light.vsPosition, 0.0) - SnappedFragPos);
-        if(LightDist > Light.Radius) continue;
-
-        float MaxSteps    = 500.0;
-        float CurrentStep = floor((1.0 - (LightDist / Light.Radius)) * MaxSteps) / MaxSteps;
-        float Attenuation = CurrentStep * (1.0 - (LightDist / Light.Radius));
-
-        float Shine = 0.0;
-        if(Material.ShineStrength == 0.0)
+        for(uint LightIndex = 0;
+            LightIndex < uPointLightCount;
+            ++LightIndex)
         {
-            Shine = 128;
-        }
-        else
-        {
-            Shine = Material.ShineStrength;
-        }
-        float SpecularLighting = pow(max(dot(Normal, ReflectDir), 0.0), Shine);
-        vec3  AdditiveLighting = Light.Color.rgb * Attenuation;
+            point_light Light   = PointLights[LightIndex];
+            vec2 FragTilePos    = floor(FragPos.xy / TileSize) * TileSize + TileSize * 0.5;
+            vec3 SnappedFragPos = vec3(FragTilePos, FragPos.z);
 
-        TotalLighting        += AdditiveLighting * Light.Strength;
-        Specular             += 0.5 * SpecularLighting * Light.Color.rgb;
+            vec3  LightDir   = normalize(vec3(Light.vsPosition, 0.0) - SnappedFragPos);
+            vec3  ReflectDir = reflect(-LightDir, Normal);
+            float LightDist  = length(vec3(Light.vsPosition, 0.0) - SnappedFragPos);
+            if(LightDist > Light.Radius) continue;
+
+            float MaxSteps    = 500.0;
+            float CurrentStep = floor((1.0 - (LightDist / Light.Radius)) * MaxSteps) / MaxSteps;
+            float Attenuation = CurrentStep * (1.0 - (LightDist / Light.Radius));
+
+            float Shine = 0.0;
+            if(Material.ShineStrength == 0.0)
+            {
+                Shine = 128;
+            }
+            else
+            {
+                Shine = Material.ShineStrength;
+            }
+            float SpecularLighting = pow(max(dot(Normal, ReflectDir), 0.0), Shine);
+            vec3  AdditiveLighting = Light.Color.rgb * Attenuation;
+
+            TotalLighting        += AdditiveLighting * Light.Strength;
+            Specular             += 0.5 * SpecularLighting * Light.Color.rgb;
+        }
+
+        vFragColor = vec4(DiffuseColor.rgb * AmbientLight + TotalLighting + Specular, DiffuseColor.a);
     }
-
-    vFragColor = vec4(DiffuseColor.rgb * AmbientLight + TotalLighting + Specular, DiffuseColor.a);
+    else
+    {
+        vFragColor = DiffuseColor;
+    }
 }
 #endif
 END
