@@ -6,7 +6,9 @@ TODO(Sleepster):
 - [x] add a "light_strength" field to point lights to brighten or dim the light
 - [x] remove the old 'Light_Attenuation_Data' field from the Point_Light 
 - [x] render_options for allowing objects to remain unaffected by both ambient and point lights
-- [ ] allow the user to control the angle of the light
+- [x] allow the user to control the angle of the light
+- [ ] Lightmap. Render all lights into a seperate texture and then mix the two textures together at the end of the final renderpass
+- [ ] stencil buffer and shadows
 - [ ] Rendering Lines  
 - [ ] Functions like 'draw_quad_xform()' that would allow XForm placement
 - [ ] Resize matrices when the window changes size
@@ -154,7 +156,10 @@ Render_State :: struct
     primary_vbo_id   : u32;
     primary_ebo_id   : u32;
 
-    forward_plus_depth_fbo_id: u32;
+    // NOTE(Sleepster): LIGHTMAP 
+    lighting_fbo_id                : u32;
+    lighting_fbo_texture_id        : u32;
+    lighting_fbo_stencil_buffer_id : u32;
 
     draw_frame_arena : Memory_Arena;
     render_data_arena: Memory_Arena;
@@ -759,6 +764,37 @@ r_init_renderer_data :: (window: *SDL_Window, asset_manager: *Asset_Manager) -> 
 
             glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, 0);
         }
+
+        // NOTE(Sleepster): LIGHT MAP FRAMEBUFFER
+        {
+            glGenFramebuffers(1, *render_state.lighting_fbo_id);
+            glBindFramebuffer(GL_FRAMEBUFFER, render_state.lighting_fbo_id);
+
+            glGenTextures(1, *render_state.lighting_fbo_texture_id);
+            glBindTexture(GL_TEXTURE_2D, render_state.lighting_fbo_id);
+            
+            glTexImage2D(GL_TEXTURE_2D, 0, GL_SRGB_ALPHA, 1920, 1080, 0, GL_RGB, GL_FLOAT, null);
+            glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
+            glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
+
+            glFramebufferTexture2D(GL_FRAMEBUFFER,
+                                   GL_COLOR_ATTACHMENT0,
+                                   GL_TEXTURE_2D,
+                                   render_state.lighting_fbo_texture_id,
+                                   0);
+
+            color_attachments: GLenum = GL_COLOR_ATTACHMENT0;
+            glDrawBuffers(1, *color_attachments);
+
+            glGenRenderbuffers(1, *render_state.lighting_fbo_stencil_buffer_id);
+            glBindRenderbuffer(GL_RENDERBUFFER, render_state.lighting_fbo_stencil_buffer_id);
+            glRenderbufferStorage(GL_RENDERBUFFER, GL_DEPTH_COMPONENT, 1920, 1080);
+            glFramebufferRenderbuffer(GL_FRAMEBUFFER, GL_DEPTH_ATTACHMENT, GL_RENDERBUFFER, render_state.lighting_fbo_stencil_buffer_id);
+
+            glBindFramebuffer(GL_FRAMEBUFFER, 0);
+            glBindRenderbuffer(GL_RENDERBUFFER, 0);
+            glBindTexture(GL_TEXTURE_2D, 0);
+        }
     }
 
     r_default_render_material = asset_get_render_material(asset_manager, "Default_Material");
@@ -956,7 +992,6 @@ r_render_group_test_render :: (render_state: *Render_State, asset_manager: *Asse
         }
 
         // TODO(Sleepster): LIGHTING AND SHADOW STUFF GOES HERE 
-
         if working_group.t_quad_count > 0
         {
             glDepthFunc(GL_GEQUAL);
