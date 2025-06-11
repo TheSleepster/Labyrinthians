@@ -146,8 +146,7 @@ main()
             }
             else
             {
-                SpotEffect = smoothstep(Light.Radius, 0.0, LightDist);
-                SpotEffect = pow(SpotEffect, 2.0);
+                SpotEffect = pow(1 - LightDist / Light.Radius, 2.5);
             }
 
             float MaxSteps    = 500.0;
