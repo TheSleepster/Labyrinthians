@@ -5,7 +5,8 @@ TODO(Sleepster):
 - [x] Allow the renderer to support Point Lights
 - [x] add a "light_strength" field to point lights to brighten or dim the light
 - [x] remove the old 'Light_Attenuation_Data' field from the Point_Light 
-- [ ] render_options for allowing objects to remain unaffected by both ambient and point lights
+- [x] render_options for allowing objects to remain unaffected by both ambient and point lights
+- [ ] allow the user to control the angle of the light
 - [ ] Rendering Lines  
 - [ ] Functions like 'draw_quad_xform()' that would allow XForm placement
 - [ ] Resize matrices when the window changes size
@@ -32,7 +33,8 @@ Point_Light :: struct
     spot_angle : float32;
     radius     : float32;
     strength   : float32;
-};
+    padding    : float32;
+}#no_padding;
 
 Rendering_Options :: enum u32
 {
@@ -801,7 +803,7 @@ r_render_group_test_render :: (render_state: *Render_State, asset_manager: *Asse
         }
     }
     r_draw_sprite(render_state, .{-200,  150}, .{100, 100}, .{1, 0, 0, 1},   sprite, deg_to_rad(140));
-    r_draw_quad(render_state,   .{ 200,  150}, .{100, 100}, .{0, 1, 0, 1},   texture.texID, .RO_UNLIT);
+    r_draw_quad(render_state,   .{ 200,  150}, .{100, 100}, .{0, 1, 0, 1},   texture.texID, 0);
     r_draw_quad(render_state,   .{ 200, -150}, .{100, 100}, .{0, 0, 1, 1},   texture.texID, 0);
     r_draw_quad(render_state,   .{-200, -150}, .{100, 100}, .{1, 0, 1, 1},   texture.texID, .RO_NONE, deg_to_rad(33));
     r_draw_quad(render_state,   .{-200, -125}, .{ 50,  50}, .{1, 0, 0, 0.8});
@@ -817,7 +819,8 @@ r_render_group_test_render :: (render_state: *Render_State, asset_manager: *Asse
     //     r_draw_quad(render_state,   .{-200, -150}, .{100, 100}, .{1, 0, 1, 1},   texture.texID, .RO_NONE, deg_to_rad(33));
     // }
 
-    light := r_create_point_light(render_state, .{250, 0}, .{0.30, 0.30, 0.30, 1.0}, .{1, 0}, deg_to_rad(360), 500, 2.0);
+    light  := r_create_point_light(render_state, .{ 250, 0}, .{0.30, 0.30, 0.30, 1.0}, .{1, 0}, deg_to_rad(45), 500, 1.0);
+    light2 := r_create_point_light(render_state, .{-250, 0}, .{0.80, 0.0,  0.0, 1.0}, .{1, 0}, deg_to_rad(180), 500, 0.5);
     
     glStencilOp(GL_KEEP, GL_KEEP, GL_REPLACE);  
     glStencilFunc(GL_ALWAYS, 1, 0xFF); // all fragments should pass the stencil test
