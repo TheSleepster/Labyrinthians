@@ -14,6 +14,7 @@ Asset_Slot :: struct
         sprite_data    : Static_Sprite2D;
         shader_data    : GPU_Shader;
         render_material: Render_Material;
+        font_data      : Dynamic_Render_Font;
     };
 };
 
@@ -27,6 +28,7 @@ Asset_Manager :: struct
     texture_hash         :  C_Hash_Table; 
     shader_hash          :  C_Hash_Table;
     render_material_hash :  C_Hash_Table;
+    render_font_hash     :  C_Hash_Table;
 };
 
 am_init :: () -> Asset_Manager
@@ -40,6 +42,7 @@ am_init :: () -> Asset_Manager
     result.texture_hash          = c_hash_table_create(*result.hash_data_arena, 509); 
     result.shader_hash           = c_hash_table_create(*result.hash_data_arena, 257);
     result.render_material_hash  = c_hash_table_create(*result.hash_data_arena, 257);
+    result.render_font_hash      = c_hash_table_create(*result.hash_data_arena, 257);
     result.master_atlas_builder  = ab_init_atlas_builder(result.asset_allocator,
                                                          ENGINE_TEXTURE_SIZE,
                                                          ENGINE_TEXTURE_SIZE,
@@ -56,7 +59,7 @@ am_init :: () -> Asset_Manager
     }
     if is_directory("../run_tree/res/sounds")
     {
-        // visit_files("../data/res/sounds",
+        // visit_files("../run_tree/res/sounds",
         //             true,
         //             cast(*void)*result,
         //             asset_manager_prepare_sound_metadata,
@@ -65,12 +68,11 @@ am_init :: () -> Asset_Manager
     }
     if is_directory("../run_tree/res/fonts")
     {
-        // visit_files("../data/res/fonts",
-        //             true,
-        //             cast(*void)*result,
-        //             asset_manager_prepare_font_metadata,
-        //             true);
-
+        visit_files("../run_tree/res/fonts",
+                    true,
+                    cast(*void)*result,
+                    am_prepare_font_metadata,
+                    true);
     }
 
     asset_add_shader_to_hash(*result, BASIC_SHADER_SOURCE_TEXT, "Basic_Shader", .PIXEL);
@@ -103,6 +105,26 @@ am_prepare_texture_metadata :: (info: *File_Visit_Info, user_data: *void)
 
         c_hash_insert_pair(*asset_manager.texture_hash, texture_data.hash_name, cast(*void)asset_slot);
         print("TEXTURE LOADED...\n");
+        print("PATH: %\n", path);
+        print("NAME: %\n\n\n", basename);
+    }
+}
+
+am_prepare_font_metadata :: (info: *File_Visit_Info, user_data: *void)
+{
+    asset_manager       := cast(*Asset_Manager)user_data;
+    path, basename, ext := path_decomp(info.full_name);
+    if ext == "ttf" && !info.is_directory
+    {
+        asset_slot := c_arena_push_struct(*asset_manager.hash_data_arena, Asset_Slot);
+        asset_slot.slot_state = .UNLOADED;
+
+        font_data := *asset_slot.font_data;
+        font_data.filepath  = copy_string(info.full_name);
+        font_data.font_name = copy_string(basename);
+
+        c_hash_insert_pair(*asset_manager.render_font_hash, font_data.font_name, cast(*void)asset_slot);
+        print("FONT LOADED...\n");
         print("PATH: %\n", path);
         print("NAME: %\n\n\n", basename);
     }
@@ -393,3 +415,228 @@ asset_get_render_material :: (asset_manager: *Asset_Manager, hash_name: string) 
 
     return result;
 }
+
+//////////////
+// FONT DATA
+//////////////
+
+Font_Glyph_Data :: struct
+{
+    glyph_data : Static_Sprite2D;
+    glyph_key  : u32;
+
+    offset_x   : s32;
+    offset_y   : s32;
+    advance    : s32;
+    ascent     : s32;
+
+    owner_page : *Dynamic_Render_Font_Page;
+};
+
+Dynamic_Render_Font_Page :: struct
+{
+    page_full       : bool;
+    page_dirty      : bool;
+
+    glyph_lookup    : C_Hash_Table;
+    texture_data    : Texture2D;
+
+    bitmap_cursor_x : s32;
+    bitmap_cursor_y : s32;
+
+    parent_varient  : *Dynamic_Render_Font_Varient;
+    next_page       : *Dynamic_Render_Font_Page;
+};
+
+Dynamic_Render_Font_Varient :: struct
+{
+    pixel_size        : s32;
+
+    character_height  : int;
+    line_spacing      : int;
+    max_ascender      : int;
+    max_descender     : int;
+    y_center_offset   : int;
+    typical_ascender  : int;
+    typical_descender : int;
+    em_width          : int;
+
+    default_unknown_character :  u32;
+    utf32_unknown_character   := 0xfffd;
+
+    parent_font : *Dynamic_Render_Font;
+    first_page  : *Dynamic_Render_Font_Page;
+};
+
+Dynamic_Render_Font :: struct
+{
+    font_face     :  FT_Face;
+    font_name     :  string;
+    filepath      :  string;
+    raw_font_data :  string;
+
+    font_arena    :  Memory_Arena;
+    pixel_sizes   :  [..]Dynamic_Render_Font_Varient;
+};
+
+set_unknown_character :: (font_varient: *Dynamic_Render_Font_Varient, utf32: u32) -> bool {
+    index := FT_Get_Char_Index(font_varient.parent_font.font_face, utf32);
+    if !index return false;
+
+    font_varient.default_unknown_character = index;
+    return true;
+}
+
+FT_ROUND :: inline (x: int) -> int {
+    if x >= 0 return (x + 0x1f) >> 6;
+    return -(((-x) + 0x1f) >> 6);
+}
+
+asset_get_font_glyph :: (font_varient: *Dynamic_Render_Font_Varient, char: *u8) -> *Font_Glyph_Data
+{
+}
+
+asset_create_font_at_size :: (font: *Dynamic_Render_Font, pixel_size: s32) -> *Dynamic_Render_Font_Varient
+{
+    result: *Dynamic_Render_Font_Varient;
+    assert(font.raw_font_data.data != null);
+
+    error := FT_New_Memory_Face(ft_library,
+                                font.raw_font_data.data,
+                             xx font.raw_font_data.count,
+                                0,
+                               *font.font_face);
+    if !error
+    {
+        result                         = c_arena_push_struct(*font.font_arena, Dynamic_Render_Font_Varient);
+        result.first_page              = c_arena_push_struct(*font.font_arena, Dynamic_Render_Font_Page);
+        result.first_page.next_page      = null;
+
+        result.first_page.glyph_lookup   = c_hash_table_create(*font.font_arena, 1024);
+        result.first_page.parent_varient = result;
+        result.pixel_size                = pixel_size;
+
+        success := FT_Set_Pixel_Sizes(font.font_face, 0, xx pixel_size);
+        assert(!success);
+
+        font_scale_to_pixels := font.font_face.size.metrics.y_scale / (64.0 * 65536.0); 
+        result.character_height = pixel_size;
+        result.line_spacing     = cast(int)floor(font_scale_to_pixels * font.font_face.height + 0.5);
+        result.max_ascender     = cast(int)floor(font_scale_to_pixels * font.font_face.bbox.yMax + 0.5);
+        result.max_descender    = cast(int)floor(font_scale_to_pixels * font.font_face.bbox.yMin + 0.5);
+        result.parent_font      = font;
+
+        glyph_index := FT_Get_Char_Index(font.font_face, #char "m");
+        if glyph_index {
+            FT_Load_Glyph(font.font_face, glyph_index, FT_LOAD_DEFAULT);
+            result.y_center_offset = xx (0.5 * FT_ROUND(font.font_face.glyph.metrics.horiBearingY) + 0.5);
+        }
+
+        glyph_index  = FT_Get_Char_Index(font.font_face, #char "M");
+        if glyph_index {
+            FT_Load_Glyph(font.font_face, glyph_index, FT_LOAD_DEFAULT);
+            result.em_width = FT_ROUND(font.font_face.glyph.metrics.width);
+        }
+
+        glyph_index  = FT_Get_Char_Index(font.font_face, #char "T");
+        if glyph_index {
+            FT_Load_Glyph(font.font_face, glyph_index, FT_LOAD_DEFAULT);
+            result.typical_ascender = FT_ROUND(font.font_face.glyph.metrics.horiBearingY);
+        }
+
+        glyph_index  = FT_Get_Char_Index(font.font_face, #char "g");
+        if glyph_index {
+            FT_Load_Glyph(font.font_face, glyph_index, FT_LOAD_DEFAULT);
+            result.typical_descender = FT_ROUND(font.font_face.glyph.metrics.horiBearingY - font.font_face.glyph.metrics.height);
+        }
+
+        error := FT_Select_Charmap(font.font_face, .UNICODE);
+        if error
+        {
+            log_error("Font does not support UNICODE...\n");
+        }
+
+        {
+            success := set_unknown_character(result, 0xfffd);  // replacement_character
+            if !success  success = set_unknown_character(result, 0x2022);  // bullet
+            if !success  success = set_unknown_character(result, #char "?");
+            if !success {
+                log_error("unable to set unknown character for font '%'.\n", basename);
+            }
+        }
+
+        array_add(*font.pixel_sizes, result);
+    }
+    else
+    {
+        log("[ERROR]: FT_New_Memory_Face() has failed...\n");
+    }
+
+    return result;
+}
+
+asset_get_font_at_size_from_hash :: (asset_manager: *Asset_Manager, font_name: string, pixel_size: s32) -> *Dynamic_Render_Font_Varient
+{
+    result: *Dynamic_Render_Font_Varient;
+
+    font := asset_get_font(asset_manager, font_name);
+    if font
+    {
+        result = asset_get_font_at_size(font, pixel_size);
+    }
+    else
+    {
+        log("[ERROR]: Font is invalid...\n");
+        assert(false);
+    }
+
+    return result;
+}
+
+asset_get_font_at_size :: (font: *Dynamic_Render_Font, desired_pixel_size: s32) -> *Dynamic_Render_Font_Varient
+{
+    result: *Dynamic_Render_Font_Varient;
+    for *pixel_size: font.pixel_sizes
+    {
+        if pixel_size.pixel_size == desired_pixel_size
+        {
+            result = pixel_size;
+            break;
+        }
+    }
+
+    if !result
+    {
+        result = asset_create_font_at_size(font, desired_pixel_size);
+    }
+
+    return result;
+}
+
+asset_get_font :: (asset_manager: *Asset_Manager, hash_name: string) -> *Dynamic_Render_Font
+{
+    result: *Dynamic_Render_Font;
+    
+    asset_slot := cast(*Asset_Slot)c_hash_get_value(*asset_manager.render_font_hash, hash_name);
+    if asset_slot != null
+    {
+        font_data := *asset_slot.font_data;
+        if font_data.raw_font_data.data == null
+        {
+            font_data.raw_font_data = read_entire_file(font_data.filepath);
+            font_data.font_arena    = c_arena_init(MB(10));
+        }
+
+        result = font_data;
+    }
+    else
+    {
+        log("[ERROR]: A font with the the name '%' is cannot be found...\n");
+    }
+
+    return result;
+}
+
+#scope_file
+ft_library: FT_Library;
+IDIOT_CONSTANT :: 1000; // this is fucking stupid
