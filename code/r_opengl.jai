@@ -819,8 +819,8 @@ r_render_group_test_render :: (render_state: *Render_State, asset_manager: *Asse
     //     r_draw_quad(render_state,   .{-200, -150}, .{100, 100}, .{1, 0, 1, 1},   texture.texID, .RO_NONE, deg_to_rad(33));
     // }
 
-    light  := r_create_point_light(render_state, .{ 250, 0}, .{0.30, 0.30, 0.30, 1.0}, .{1, 0}, deg_to_rad(45), 500, 1.0);
-    light2 := r_create_point_light(render_state, .{-250, 0}, .{0.80, 0.0,  0.0, 1.0}, .{1, 0}, deg_to_rad(180), 500, 0.5);
+    light  := r_create_point_light(render_state, .{ 250, 0}, .{0.30, 0.30, 0.30, 1.0}, .{1, 0},  deg_to_rad(45), 500, 1.0);
+    light2 := r_create_point_light(render_state, .{-250, 0}, .{0.30, 0.30,  0.30, 1.0}, .{1, 0}, deg_to_rad(180), 500, 1.0);
     
     glStencilOp(GL_KEEP, GL_KEEP, GL_REPLACE);  
     glStencilFunc(GL_ALWAYS, 1, 0xFF); // all fragments should pass the stencil test

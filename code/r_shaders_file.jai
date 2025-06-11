@@ -130,7 +130,7 @@ main()
             float LightDist         = length(LightPos - SnappedFragPos);
             if (LightDist > Light.Radius) continue;
 
-            float SpotEffect  = 0.10;
+            float SpotEffect;
             if (Light.SpotAngle < 3.1415926535)
             {
                 float OuterAngle    = Light.SpotAngle;
@@ -147,6 +147,7 @@ main()
             else
             {
                 SpotEffect = smoothstep(Light.Radius, 0.0, LightDist);
+                SpotEffect = pow(SpotEffect, 2.0);
             }
 
             float MaxSteps    = 500.0;
