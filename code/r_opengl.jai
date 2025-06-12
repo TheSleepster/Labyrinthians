@@ -848,6 +848,9 @@ r_render_group_test_render :: (render_state: *Render_State, asset_manager: *Asse
     r_draw_quad(render_state,   .{-200, -125}, .{ 50,  50}, .{1, 0, 0, 0.8});
     r_draw_quad(render_state,   .{-175, -125}, .{ 50,  50}, .{0, 0, 1, 0.8});
 
+    font      := asset_get_font(asset_manager, "LiberationMono-Regular");
+    r_draw_text(render_state, font, "This is a test", .{-250, 0}, 64, .{1, 1, 1, 1});
+
     // for 0..10000
     // {
     //     r_draw_quad(render_state,   .{-175, -125}, .{ 50,  50}, .{0, 0, 1, 0.8});

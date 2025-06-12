@@ -45,8 +45,6 @@ L_labyrinthian_main :: ()
         input_manager: Input_Manager;
         render_state := r_init_renderer_data(window, *asset_manager);
 
-        font := asset_get_font(*asset_manager, "LiberationMono-Regular");
-
         is_running := true;
         while is_running
         {

@@ -34,6 +34,8 @@ Asset_Manager :: struct
 am_init :: () -> Asset_Manager
 {
     stbi_set_flip_vertically_on_load(1);
+    error := FT_Init_FreeType(*ft_library);
+    assert(!error);
     
     result: Asset_Manager;
     result.asset_allocator       = za_init(GB(1));
@@ -167,6 +169,20 @@ asset_init_bitmap :: (zone: *Zone_Allocator, width: s32, height: s32, format: Bi
     result.height   = height;
     result.stride   = xx (1 * xx result.format);
     result.data     = za_alloc(zone, size_of(u8) * (cast(u32)(result.width * result.height) * xx result.format), .STATIC);
+    result.is_valid = true;
+    result.channels = xx result.format;
+
+    return result;
+}
+
+asset_init_bitmap_arena :: (arena: *Memory_Arena, width: s32, height: s32, format: Bitmap_Format) -> Bitmap
+{
+    result: Bitmap;
+    result.format   = format;
+    result.width    = width;
+    result.height   = height;
+    result.stride   = xx (1 * xx result.format);
+    result.data     = c_arena_push_size(arena, (size_of(u8) * ((width * height) * xx format)));
     result.is_valid = true;
     result.channels = xx result.format;
 
@@ -492,8 +508,175 @@ FT_ROUND :: inline (x: int) -> int {
     return -(((-x) + 0x1f) >> 6);
 }
 
+convert_to_utf32 :: inline (s: *u8) -> u32 {
+    utf32 := character_utf8_to_utf32(s, IDIOT_CONSTANT); // god I sure hope we don't need more 
+    return utf32;
+}
+
+font_find_next_atlas_line :: inline (page: *Dynamic_Render_Font_Page, width: u32, height: u32) -> iVector2
+{
+    bitmap := *page.texture_data.bitmap;
+    desired_x := page.bitmap_cursor_x + xx width;
+    if desired_x > bitmap.width
+    {
+        page.bitmap_cursor_x = 0;
+        page.bitmap_cursor_y += xx page.parent_varient.max_ascender;
+        return .{0, xx page.bitmap_cursor_y};
+    }
+    else
+    {
+        return .{xx page.bitmap_cursor_x, xx page.bitmap_cursor_y};
+    }
+}
+copy_glyph_to_page_bitmap :: (page: *Dynamic_Render_Font_Page, glyph: *Font_Glyph_Data)
+{
+    if page.texture_data.bitmap.data == null
+    {
+        page.texture_data.bitmap = asset_init_bitmap_arena(*page.parent_varient.parent_font.font_arena,
+                                                           2048,
+                                                           2048,
+                                                          .FORMAT_RGBA);
+    }
+    assert(page.texture_data.bitmap.data != null);
+    
+    face := page.parent_varient.parent_font.font_face;
+    b    := face.glyph.bitmap;
+
+    glyph.offset_x                = cast,trunc(s16)face.glyph.bitmap_left;
+    glyph.offset_y                = cast,trunc(s16)face.glyph.bitmap_top;
+    glyph.advance                 = cast,trunc(s16)(face.glyph.advance.x >> 6);
+
+    metrics := *face.glyph.metrics;
+    glyph.ascent = cast,trunc(s16)(metrics.horiBearingY >> 6);
+
+    atlas_dest := font_find_next_atlas_line(glyph.owner_page, b.width, b.rows);
+
+    dest_x: s32 = xx atlas_dest.x;
+    dest_y: s32 = xx atlas_dest.y;
+
+    glyph.glyph_data.atlas_size.x = xx b.width;
+    glyph.glyph_data.atlas_size.y = xx b.rows;
+
+    glyph.glyph_data.atlas_offset.x = dest_x;
+    glyph.glyph_data.atlas_offset.y = dest_y;
+
+    bitmap := *glyph.owner_page.texture_data.bitmap;
+
+    rows  := cast(s32)b.rows; 
+    width := cast(s32)b.width;
+    for j : 0..rows-1 {
+        for i : 0..width-1 {
+            source_pixel := b.buffer[(rows - 1 - j) * b.pitch + i];
+
+            dest_pixel := bitmap.data + ((dest_y + j) * bitmap.width + (dest_x + i)) * 4;
+            dest_pixel[0] = source_pixel;
+            dest_pixel[1] = source_pixel;
+            dest_pixel[2] = source_pixel;
+            dest_pixel[3] = source_pixel;
+        }
+    }
+    glyph.owner_page.bitmap_cursor_x += cast(s16) b.width;
+}
+
 asset_get_font_glyph :: (font_varient: *Dynamic_Render_Font_Varient, char: *u8) -> *Font_Glyph_Data
 {
+    result     : *Font_Glyph_Data;
+    found_page : *Dynamic_Render_Font_Page;
+
+    utf32_char := convert_to_utf32(char);
+    if utf32_char
+    {
+        temp := tprint("%", utf32_char);
+
+        page_ptr := font_varient.first_page;
+        while page_ptr != null
+        {
+            result = cast(*Font_Glyph_Data)c_hash_get_value(*page_ptr.glyph_lookup, temp);
+            if result
+            {
+                found_page = page_ptr; 
+                break;
+            }
+            page_ptr = page_ptr.next_page;
+        }
+
+        if !result && !found_page
+        {
+            new_page: *Dynamic_Render_Font_Page = font_varient.first_page;
+            while new_page
+            {
+                if !new_page.page_full
+                {
+                    found_page = new_page;
+                    break;
+                }
+                new_page = new_page.next_page;
+            }
+
+            if !found_page
+            {
+                new_page = font_varient.first_page;
+                while new_page
+                {
+                    if new_page.next_page == null
+                    {
+                        new_page.next_page                = c_arena_push_struct(*font_varient.parent_font.font_arena, Dynamic_Render_Font_Page);
+                        new_page.next_page.glyph_lookup   = c_hash_table_create(*font_varient.parent_font.font_arena, 1024);
+                        new_page.next_page.parent_varient = font_varient;
+                        new_page.next_page.next_page      = null;
+
+                        found_page = new_page;
+                        break;
+                        
+                    }
+                    new_page = new_page.next_page;
+                }
+            }
+
+            error := FT_Set_Pixel_Sizes(found_page.parent_varient.parent_font.font_face,
+                                        0,
+                                        xx found_page.parent_varient.character_height);
+            assert(!error);
+
+            glyph_index : u32;
+            if utf32_char
+            {
+                glyph_index = FT_Get_Char_Index(found_page.parent_varient.parent_font.font_face, utf32_char);
+                if !glyph_index
+                {
+                    log_error("UTF32 character '%' cannot be found", utf32_char);
+                    glyph_index = found_page.parent_varient.default_unknown_character;
+                }
+
+                if glyph_index
+                {
+                    error = FT_Load_Glyph(found_page.parent_varient.parent_font.font_face, glyph_index, FT_LOAD_RENDER);
+                    assert(!error);
+                }
+            }
+            else
+            {
+                assert(glyph_index >= 0);
+                error = FT_Load_Glyph(found_page.parent_varient.parent_font.font_face, glyph_index, FT_LOAD_RENDER);
+                assert(!error);
+            }
+
+            data := c_arena_push_struct(*found_page.parent_varient.parent_font.font_arena, Font_Glyph_Data);
+            data.glyph_key  = glyph_index;
+            data.owner_page = found_page;
+
+            copy_glyph_to_page_bitmap(found_page, data);
+            data.owner_page.page_dirty = true;
+
+            c_hash_insert_pair(*found_page.glyph_lookup, copy_string(temp), cast(*void)data);
+            result = data;
+        }
+    }
+    else
+    {
+        log("[ERROR]: Character '%s' does not return a valid utf32 character...", char);
+    }
+    return result;
 }
 
 asset_create_font_at_size :: (font: *Dynamic_Render_Font, pixel_size: s32) -> *Dynamic_Render_Font_Varient
@@ -557,7 +740,7 @@ asset_create_font_at_size :: (font: *Dynamic_Render_Font, pixel_size: s32) -> *D
         }
 
         {
-            success := set_unknown_character(result, 0xfffd);  // replacement_character
+            success             := set_unknown_character(result, 0xfffd);  // replacement_character
             if !success  success = set_unknown_character(result, 0x2022);  // bullet
             if !success  success = set_unknown_character(result, #char "?");
             if !success {
@@ -624,7 +807,7 @@ asset_get_font :: (asset_manager: *Asset_Manager, hash_name: string) -> *Dynamic
         if font_data.raw_font_data.data == null
         {
             font_data.raw_font_data = read_entire_file(font_data.filepath);
-            font_data.font_arena    = c_arena_init(MB(10));
+            font_data.font_arena    = c_arena_init(MB(50));
         }
 
         result = font_data;

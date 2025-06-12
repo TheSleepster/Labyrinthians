@@ -273,6 +273,84 @@ r_create_point_light :: (render_state: *Render_State,
     return point_light;
 }
 
+r_prepare_string :: (varient: *Dynamic_Render_Font_Varient, text: string) -> s32 
+{
+    result: s32;
+    
+    temp := text.data;
+    glyph: *Font_Glyph_Data;
+    while temp < text.data + text.count
+    {
+        char: string;
+        char.data = temp; 
+        char.count = 1;
+        
+        glyph      = asset_get_font_glyph(varient, temp);
+        result    += glyph.glyph_data.atlas_size.x + glyph.advance;
+        temp       = unicode_next_character(temp);
+    }
+    
+    if glyph.owner_page.page_dirty
+    {
+        if glyph.owner_page.texture_data.texID != 0
+        {
+            r_update_gpu_texture_from_bitmap(*glyph.owner_page.texture_data);
+        }
+        else
+        {
+            r_upload_texture_to_gpu(*glyph.owner_page.texture_data, .LINEAR, true);
+        }
+        glyph.owner_page.page_dirty = false;
+    }
+    return result;
+}
+
+r_draw_text :: (render_state: *Render_State,
+                dynamic_font : *Dynamic_Render_Font,
+                text         :  string,
+                center_pos   :  Vector2,
+                font_scale   :  s32,
+                color        :  Vector4)
+{
+    draw_frame := *render_state.draw_frame;
+    font_page  := asset_get_font_at_size(dynamic_font, font_scale);
+    if font_page != null
+    {
+        total_width  : s32 = r_prepare_string(font_page, text);
+        starting_pos := (Vector2).{center_pos.x - (total_width * 0.5), center_pos.y};
+        render_pos   := starting_pos;
+        
+        temp := text.data;
+        while temp < text.data + text.count
+        {
+            char: string;
+            char.data = temp; 
+            char.count = 1;
+
+            glyph := asset_get_font_glyph(font_page, temp);
+            if temp == " "
+            {
+                render_pos.x += glyph.advance;
+                continue;
+            }
+            glyph.glyph_data.atlas_texture = *glyph.owner_page.texture_data;
+            r_draw_sprite(render_state,
+                         (Vector2).{floor(render_pos.x + glyph.offset_x), floor(render_pos.y + (glyph.ascent - glyph.glyph_data.atlas_size.y))},
+                         .{xx glyph.glyph_data.atlas_size.x, xx glyph.glyph_data.atlas_size.y},
+                          color,
+                         *glyph.glyph_data,
+                          0.0,
+                         .RO_UNLIT);
+            render_pos.x += glyph.advance;
+            temp          = unicode_next_character(temp);
+        }
+    }
+    else
+    {
+        log_error("Failed to get the font page data back from the asset system...\n");
+    }
+}
+
 r_push_render_layer :: inline (render_state: *Render_State, layer: u32)
 {
     render_state.draw_frame.current_render_layer = layer;
