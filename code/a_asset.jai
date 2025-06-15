@@ -34,6 +34,7 @@ Asset_Manager :: struct
 am_init :: () -> Asset_Manager
 {
     stbi_set_flip_vertically_on_load(1);
+
     error := FT_Init_FreeType(*ft_library);
     assert(!error);
     
@@ -66,7 +67,6 @@ am_init :: () -> Asset_Manager
         //             cast(*void)*result,
         //             asset_manager_prepare_sound_metadata,
         //             true);
-
     }
     if is_directory("../run_tree/res/fonts")
     {
@@ -77,7 +77,18 @@ am_init :: () -> Asset_Manager
                     true);
     }
 
-    asset_add_shader_to_hash(*result, BASIC_SHADER_SOURCE_TEXT, "Basic_Shader", .PIXEL);
+    basic_shader_SSBO_configs := c_arena_push_array(*result.permanent_asset_arena, GPU_Shader_Buffer_Config, 1);
+    basic_shader_SSBO_configs[0] = .{"PointLightSBO", MAX_LIGHTS * size_of(Point_Light), false};
+
+    light_cluster_shader_configs   := c_arena_push_array(*result.permanent_asset_arena, GPU_Shader_Buffer_Config, 3);
+    light_cluster_shader_configs[0] = .{"PointLightSBO",     MAX_LIGHTS * size_of(Point_Light), false};
+    light_cluster_shader_configs[1] = .{"LightIndicesSBO",   size_of(s32) * (((1920/16) * (1080/16)) * MAX_LIGHTS_PER_TILE_CLUSTER), true};
+    light_cluster_shader_configs[2] = .{"TileLightCountSBO", size_of(s32) * ((1920/16) * (1080/16)), true};
+
+    asset_add_shader_to_hash(*result, BASIC_SHADER_SOURCE_TEXT, "Basic_Shader", basic_shader_SSBO_configs, .PIXEL);
+    asset_add_shader_to_hash(*result, LIGHT_CLUSTERING_COMPUTE_SHADER, "Light_Cluster_Compute", light_cluster_shader_configs, .COMPUTE);
+    asset_add_shader_to_hash(*result, LIGHTMAP_SHADER_TEXT, "Lightmap_Render_Pass_Shader", basic_shader_SSBO_configs, .PIXEL);
+    asset_add_shader_to_hash(*result, FINAL_STAGE_MIXING_SHADER, "Final_Render_Pass_Shader", .[], .PIXEL);
 
     default_material: *Render_Material = c_arena_push_struct(*result.permanent_asset_arena, Render_Material);
     default_material.ambient_color  = .{1, 1, 1, 1};
@@ -353,14 +364,19 @@ asset_get_sprite :: (asset_manager: *Asset_Manager, sprite_name: string, insert_
 // SHADERS
 ////////////
 
-asset_add_shader_to_hash :: (asset_manager: *Asset_Manager, shader_source_string: string, hash_name: string, type: GPU_Shader_Type)
+asset_add_shader_to_hash :: (asset_manager       : *Asset_Manager,
+                             shader_source_string: string,
+                             hash_name           : string,
+                             shader_buffer_config: []GPU_Shader_Buffer_Config,
+                             type                : GPU_Shader_Type)
 {
     asset_slot  := c_arena_push_struct(*asset_manager.hash_data_arena, Asset_Slot);
     shader_data := *asset_slot.shader_data;
 
-    shader_data.shader_type   = type;
-    shader_data.hash_name     = hash_name;
-    shader_data.shader_source = shader_source_string;    
+    shader_data.shader_type       = type;
+    shader_data.hash_name         = hash_name;
+    shader_data.shader_source     = shader_source_string;    
+    shader_data.SBO_buffer_config = shader_buffer_config; 
 
     c_hash_insert_pair(*asset_manager.shader_hash, hash_name, asset_slot);
 }
@@ -375,7 +391,10 @@ asset_get_shader :: (asset_manager: *Asset_Manager, shader_name: string) -> *GPU
         shader := *asset_slot.shader_data;
         if shader.program_id == 0
         {
-            shader.* = compile_shader_source(*asset_manager.permanent_asset_arena, *shader.shader_source, shader.shader_type);
+            shader.* = compile_shader_source(*asset_manager.permanent_asset_arena,
+                                            *shader.shader_source,
+                                             shader.SBO_buffer_config,
+                                             shader.shader_type);
         }
         result = shader;
     }

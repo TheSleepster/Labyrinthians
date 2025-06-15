@@ -170,6 +170,7 @@ MAX_RENDER_GROUPS :: 1021;
 // NOTE(Sleepster): This function is used to work to set up the amount of render groups we need
 r_handle_group_buffers :: (render_state: *Render_State)
 {
+    d_profile_scope();
     draw_frame := *render_state.draw_frame;
 
     // TODO(Sleepster): Check if this hash needs to be larger 
@@ -193,21 +194,21 @@ r_handle_group_buffers :: (render_state: *Render_State)
                 xx current_quad_buffer.quad_count,
                    size_of(Render_Quad), 
                 xx offset_of(Render_Quad, #code required_shader_id),
-                   8);
+                   4);
 
         radix_sort(current_quad_buffer.quad_buffer.data,
                    sorting_buffer2.data,
                 xx current_quad_buffer.quad_count,
                    size_of(Render_Quad), 
                 xx offset_of(Render_Quad, #code quad_render_matrix_id),
-                   8);
+                   4);
 
         radix_sort(current_quad_buffer.quad_buffer.data,
                    sorting_buffer3.data,
                 xx current_quad_buffer.quad_count,
                    size_of(Render_Quad), 
                 xx offset_of(Render_Quad, #code render_layer),
-                   8);
+                   4);
 
         if draw_frame.bound_texture_counter > 1
         {
@@ -216,7 +217,7 @@ r_handle_group_buffers :: (render_state: *Render_State)
                     xx current_quad_buffer.quad_count,
                        size_of(Render_Quad), 
                     xx offset_of(Render_Quad, #code required_texture_id),
-                       8);
+                       4);
         }
 
         radix_sort(current_quad_buffer.quad_buffer.data,
@@ -224,7 +225,7 @@ r_handle_group_buffers :: (render_state: *Render_State)
                 xx current_quad_buffer.quad_count,
                    size_of(Render_Quad),
                 xx offset_of(Render_Quad, #code is_transparent),
-                   4);
+                   2);
         
         c_arena_end_temporary_memory(*scratch_buffer);
         current_quad_buffer = current_quad_buffer.next_buffer;

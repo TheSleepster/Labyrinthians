@@ -12,17 +12,21 @@ TODO(Sleepster):
 - [ ] Rendering Lines  
 - [ ] Functions like 'draw_quad_xform()' that would allow XForm placement
 - [ ] Resize matrices when the window changes size
+- [ ] Build a proper debug Profiler (graphs, ui, the works)
 */
 
-MAX_GROUP_VERTICES  :: 10000;
-MAX_QUADS           :: MAX_GROUP_VERTICES / 4;
-MAX_QUAD_INDICES    :: MAX_QUADS * 6;
-MAX_LINES           :: MAX_GROUP_VERTICES / 2;
-MAX_TRIANGLES       :: #run {cast(s64)(floor(MAX_GROUP_VERTICES / 3));}
-MAX_TEXTURE_SLOTS   :: 16;
-MAX_RENDER_PASSES   :: 32;
-MAX_LIGHTS          :: 2048;
-ENGINE_TEXTURE_SIZE :: 2048;
+MAX_GROUP_VERTICES          :: 10000;
+MAX_QUADS                   :: MAX_GROUP_VERTICES / 4;
+MAX_QUAD_INDICES            :: MAX_QUADS * 6;
+
+MAX_LINES                   :: MAX_GROUP_VERTICES / 2;
+MAX_TRIANGLES               :: #run {cast(s64)(floor(MAX_GROUP_VERTICES / 3));}
+
+MAX_TEXTURE_SLOTS           :: 16;
+MAX_RENDER_PASSES           :: 32;
+MAX_LIGHTS                  :: 2048;
+MAX_LIGHTS_PER_TILE_CLUSTER :: 64;
+ENGINE_TEXTURE_SIZE         :: 2048;
 
 r_default_render_material: *Render_Material;
 
@@ -80,11 +84,20 @@ GPU_Shader_Uniform :: struct
     uniform_data  : *void;
 };
 
+// TODO(Sleepster): Buffer Type (STATIC, DYNAMIC, STREAM)? 
+GPU_Shader_Buffer_Config :: struct
+{
+    buffer_name: string;
+    size_init  : s64;
+    read_only  : bool;
+};
+
 GPU_Shader_Buffer :: struct
 {
     buffer_name   :  string;
     buffer_binding:  u32;
     location_id   :  u32;
+    read_only     :  bool;
 
     update_buffer :  (location: u32, size: s64, data: *void);
     buffer_size   :  s64;
@@ -106,19 +119,22 @@ GPU_Shader_Type :: enum
 
 GPU_Shader :: struct
 {
-    program_id     :   u32;
-    shader_source  :   string;
-    hash_name      :   string;
-    shader_type    :   GPU_Shader_Type;
+    program_id       :   u32;
+    shader_source    :   string;
+    hash_name        :   string;
+    shader_type      :   GPU_Shader_Type;
 
-    update_buffer  : (shader: *GPU_Shader, buffer_name : string, size: s64, data: *void);
-    update_uniform : (shader: *GPU_Shader, uniform_name: string, data: *void);
-    update_UBO     : (shader: *GPU_Shader, UBO_name    : string, data: *void);
+    update_buffer    : (shader: *GPU_Shader, buffer_name : string, size    : s64, data: *void);
+    resize_shader_buf: (shader: *GPU_Shader, buffer_name : string, new_size: s64);
+    update_uniform   : (shader: *GPU_Shader, uniform_name: string, data    : *void);
+    update_UBO       : (shader: *GPU_Shader, UBO_name    : string, data    : *void);
 
-    uniform_data   : []GPU_Shader_Uniform;
-    UBO_buffer_data: []GPU_Shader_Buffer;
-    SBO_buffer_data: []GPU_Shader_Buffer;
-    sampler_data   : []GPU_Shader_Sampler;
+    uniform_data     : []GPU_Shader_Uniform;
+    UBO_buffer_data  : []GPU_Shader_Buffer;
+    SBO_buffer_data  : []GPU_Shader_Buffer;
+    SBO_buffer_config: []GPU_Shader_Buffer_Config;
+
+    sampler_data     : []GPU_Shader_Sampler;
 };
 
 Draw_Frame :: struct
@@ -152,19 +168,59 @@ Draw_Frame :: struct
 
 Render_State :: struct
 {
-    primary_vao_id   : u32;
-    primary_vbo_id   : u32;
-    primary_ebo_id   : u32;
+    primary_vao_id                 : u32;
+    primary_vbo_id                 : u32;
+    primary_ebo_id                 : u32;
+
+    draw_frame_arena               : Memory_Arena;
+    render_data_arena              : Memory_Arena;
+    draw_frame                     : Draw_Frame;
 
     // NOTE(Sleepster): LIGHTMAP 
     lighting_fbo_id                : u32;
     lighting_fbo_texture_id        : u32;
     lighting_rbo_stencil_buffer_id : u32;
 
-    draw_frame_arena : Memory_Arena;
-    render_data_arena: Memory_Arena;
-    draw_frame       : Draw_Frame;
+    lighting_cluster_compute_shader: *GPU_Shader;
+    lightmap_shader                : *GPU_Shader;
+    lit_geometry_mixing_shader     : *GPU_Shader;
 };
+
+// TODO(Sleepster): speed... 
+gl_resize_SSBO :: (shader: *GPU_Shader, buffer_name: string, new_size: s64)
+{
+    buffer_config: *GPU_Shader_Buffer_Config;
+    buffer:        *GPU_Shader_Buffer;
+    for *config: shader.SBO_buffer_config
+    {
+        if compare_strings(buffer_name, config.buffer_name) == 0
+        {
+            buffer_config = config;
+        }
+    }
+
+    for *a_buffer: shader.SBO_buffer_data
+    {
+        if compare_strings(buffer_name, a_buffer.buffer_name) == 0
+        {
+            buffer = a_buffer;
+        }
+    }
+
+    if buffer_config != null && buffer != null
+    {
+        buffer_config.size_init = new_size;
+
+        glBindBuffer(GL_SHADER_STORAGE_BUFFER, buffer.location_id);
+        glBufferData(GL_SHADER_STORAGE_BUFFER, buffer_config.size_init, null, GL_DYNAMIC_DRAW);
+        glBindBuffer(GL_SHADER_STORAGE_BUFFER, 0);
+    }
+    else
+    {
+        log("[ERROR]: buffer_name of '%' is not valid...\n", buffer_name);
+        assert(false);
+    }
+}
 
 gl_update_SSBO :: inline (location: u32, size: s64, data: *void)
 {
@@ -261,9 +317,10 @@ gl_shader_storage_buffer_object_update_buffer :: (shader: *GPU_Shader, buffer_na
             break;
         }
     }
-
     if shader_buffer
     {
+        if shader_buffer.read_only return;
+        
         shader_buffer.buffer_data   = data;
         shader_buffer.buffer_size   = size;
         shader_buffer.update_buffer = gl_update_SSBO;
@@ -384,13 +441,42 @@ compile_pixel_shader :: (arena: *Memory_Arena, shader_text: *string) -> GLuint
     {
         log_data: [LOG_BUFFER_SIZE]u8;
         glGetProgramInfoLog(program, log_data.count, null, log_data.data);
-        log_error("%", to_string(log_data.data));
+        log_error("\n[SHADER COMP ERROR]: %\n\n", to_string(log_data.data));
+
         return 0;
     }
     
     glDeleteShader(vertex_shader);
     glDeleteShader(fragment_shader);
     
+    return program;
+}
+
+compile_compute_shader :: (arena: *Memory_Arena, shader_text: *string) -> GLuint
+{
+    LOG_BUFFER_SIZE :: 512;
+    PREFIX_COMP :: #string END
+        #version 430 core
+    END
+
+    compute_shader := make_shader_object(shader_text, PREFIX_COMP, GL_COMPUTE_SHADER);
+    program        := glCreateProgram();
+
+    glAttachShader(program, compute_shader);
+    glLinkProgram(program);
+    
+    success: GLint = 0;
+    glGetProgramiv(program, GL_LINK_STATUS, *success);
+    if !success
+    {
+        log_data: [LOG_BUFFER_SIZE]u8;
+        glGetProgramInfoLog(program, log_data.count, null, log_data.data);
+        log_error("\n[SHADER COMP ERROR]: %\n\n", to_string(log_data.data));
+
+        return 0;
+    }
+
+    glDeleteShader(compute_shader);
     return program;
 }
 
@@ -454,14 +540,19 @@ assign_uniform_type :: inline (uniform: *GPU_Shader_Uniform, type: GLenum)
     };
 }
 
-compile_shader_source :: (arena: *Memory_Arena, source: *string, type: GPU_Shader_Type) -> GPU_Shader
+compile_shader_source :: (arena         : *Memory_Arena,
+                          source        : *string,
+                          buffer_configs: []GPU_Shader_Buffer_Config,
+                          type          : GPU_Shader_Type) -> GPU_Shader
 {
     shader: GPU_Shader;
-    shader.shader_type    = type;
-    shader.shader_source  = source.*;
-    shader.update_uniform = gl_shader_update_uniform;
-    shader.update_buffer  = gl_shader_storage_buffer_object_update_buffer;
-    shader.update_UBO     = gl_shader_UBO_update_buffer;
+    shader.shader_type       = type;
+    shader.shader_source     = source.*;
+    shader.update_uniform    = gl_shader_update_uniform;
+    shader.update_buffer     = gl_shader_storage_buffer_object_update_buffer;
+    shader.resize_shader_buf = gl_resize_SSBO;
+    shader.update_UBO        = gl_shader_UBO_update_buffer;
+    shader.SBO_buffer_config = buffer_configs;
     if shader.shader_type ==
     {
         case .PIXEL;
@@ -470,7 +561,7 @@ compile_shader_source :: (arena: *Memory_Arena, source: *string, type: GPU_Shade
         }
         case .COMPUTE;
         {
-            log_error("Might wanna add compute shader support brother...\n");
+            shader.program_id = compile_compute_shader(arena, *shader.shader_source);
         }
         case .UNDEFINED;
         {
@@ -555,14 +646,14 @@ compile_shader_source :: (arena: *Memory_Arena, source: *string, type: GPU_Shade
             if shader_storage_buffer_count != 0
             {
                 shader.SBO_buffer_data = c_arena_push_array(arena, GPU_Shader_Buffer, xx shader_storage_buffer_count);
-                for GPU_buffer_index: 0..shader.SBO_buffer_data.count - 1
+                for gpu_buffer_index: 0..shader.SBO_buffer_data.count - 1
                 {
-                    current_buffer := *shader.SBO_buffer_data[GPU_buffer_index];
+                    current_buffer := *shader.SBO_buffer_data[gpu_buffer_index];
                     buffer: [256]u8;
                     length: u32;
                     glGetProgramResourceName(shader.program_id,
                                              GL_SHADER_STORAGE_BLOCK,
-                                             xx GPU_buffer_index,
+                                             xx gpu_buffer_index,
                                              256,
                                             *length, buffer.data);
                     current_buffer.buffer_name.data  = c_arena_push_size(arena, size_of(u8) * length);
@@ -573,17 +664,29 @@ compile_shader_source :: (arena: *Memory_Arena, source: *string, type: GPU_Shade
                     property: GLenum = GL_BUFFER_BINDING;
                     glGetProgramResourceiv(shader.program_id,
                                            GL_SHADER_STORAGE_BLOCK,
-                                           xx GPU_buffer_index,
+                                           xx gpu_buffer_index,
                                            1,
                                           *property,
                                            1,
                                            null,
                                           *shader_buffer_binding);
                     current_buffer.buffer_binding = xx shader_buffer_binding;
+                    assert(shader.SBO_buffer_config.data != null);
+                    correct_buffer_config: *GPU_Shader_Buffer_Config;
+                    for *buffer_config: shader.SBO_buffer_config
+                    {
+                        if compare_strings(current_buffer.buffer_name, buffer_config.buffer_name) == 0
+                        {
+                            correct_buffer_config = buffer_config;
+                        }
+                    }
+                    assert(correct_buffer_config != null);
+                    current_buffer.read_only = correct_buffer_config.read_only;
 
                     glGenBuffers(1, *current_buffer.location_id);
                     glBindBuffer(GL_SHADER_STORAGE_BUFFER, current_buffer.location_id);
-                    glBufferData(GL_SHADER_STORAGE_BUFFER, MAX_LIGHTS * size_of(Point_Light), null, GL_DYNAMIC_DRAW);
+                    glBufferData(GL_SHADER_STORAGE_BUFFER, correct_buffer_config.size_init, null, GL_DYNAMIC_DRAW);
+                    glBindBuffer(GL_SHADER_STORAGE_BUFFER, 0);
                 }
             }
         }
@@ -675,6 +778,55 @@ r_update_gpu_texture_from_bitmap :: (texture: *Texture2D) -> bool
     return true;
 }
 
+r_create_lighting_framebuffer :: (render_state: *Render_State)
+{
+    {
+        glBindFramebuffer(GL_FRAMEBUFFER, render_state.lighting_fbo_id);
+
+        glBindTexture(GL_TEXTURE_2D, render_state.lighting_fbo_id);
+        glTexImage2D(GL_TEXTURE_2D,
+                     0,
+                     GL_SRGB_ALPHA,
+                     xx global_window_data.current_window_size.x,
+                     xx global_window_data.current_window_size.y,
+                     0,
+                     GL_RGB,
+                     GL_FLOAT,
+                     null);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
+
+        glFramebufferTexture2D(GL_FRAMEBUFFER,
+                               GL_COLOR_ATTACHMENT0,
+                               GL_TEXTURE_2D,
+                               render_state.lighting_fbo_texture_id,
+                               0);
+
+        color_attachments: GLenum = GL_COLOR_ATTACHMENT0;
+        glDrawBuffers(1, *color_attachments);
+
+        glBindRenderbuffer(GL_RENDERBUFFER, render_state.lighting_rbo_stencil_buffer_id);
+        glRenderbufferStorage(GL_RENDERBUFFER,
+                              GL_DEPTH_COMPONENT,
+                              xx global_window_data.current_window_size.x,
+                              xx global_window_data.current_window_size.y);
+
+        glFramebufferRenderbuffer(GL_FRAMEBUFFER,
+                                  GL_DEPTH_ATTACHMENT,
+                                  GL_RENDERBUFFER,
+                                  render_state.lighting_rbo_stencil_buffer_id);
+
+        glBindFramebuffer(GL_FRAMEBUFFER, 0);
+        glBindRenderbuffer(GL_RENDERBUFFER, 0);
+        glBindTexture(GL_TEXTURE_2D, 0);
+    }
+}
+
+r_resize_render_data :: inline (render_state: *Render_State)
+{
+    r_create_lighting_framebuffer(render_state);
+}
+
 r_init_renderer_data :: (window: *SDL_Window, asset_manager: *Asset_Manager) -> Render_State
 {
     // NOTE(Sleepster): GL State Init 
@@ -699,8 +851,11 @@ r_init_renderer_data :: (window: *SDL_Window, asset_manager: *Asset_Manager) -> 
         glStencilMask(0xFF);
 
         glEnable(GL_BLEND);        
-        glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
         glBlendEquation(GL_FUNC_ADD);
+        glBlendFunc(GL_ONE, GL_ONE_MINUS_SRC_COLOR);
+
+        // glBlendFuncSeparate(GL_ONE, GL_ONE, GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA); 
+        // glBlendEquationSeparate(GL_MAX, GL_FUNC_ADD);
 
         glEnable(GL_FRAMEBUFFER_SRGB);
         print("GL Vendor: %\n", to_string(glGetString(GL_VENDOR)));
@@ -765,58 +920,99 @@ r_init_renderer_data :: (window: *SDL_Window, asset_manager: *Asset_Manager) -> 
             glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, 0);
         }
 
-        // NOTE(Sleepster): LIGHT MAP FRAMEBUFFER
+        glGenTextures(1, *render_state.lighting_fbo_texture_id);
+        glGenFramebuffers(1, *render_state.lighting_fbo_id);
+        glGenRenderbuffers(1, *render_state.lighting_rbo_stencil_buffer_id);
+        r_create_lighting_framebuffer(*render_state);
+    }
+    render_state.lighting_cluster_compute_shader = asset_get_shader(asset_manager, "Light_Cluster_Compute");
+    r_default_render_material                    = asset_get_render_material(asset_manager, "Default_Material");
+
+    return render_state;
+}
+
+r_update_shader_data :: (working_group: *Render_Group, shader: *GPU_Shader)
+{
+    for uniform_index: 0..shader.uniform_data.count - 1
+    {
+        uniform := *shader.uniform_data[uniform_index];
+        if uniform.type != .TEXTURE_BINDING && uniform.type != .TEXTURE_ARRAY
         {
-            glGenFramebuffers(1, *render_state.lighting_fbo_id);
-            glBindFramebuffer(GL_FRAMEBUFFER, render_state.lighting_fbo_id);
+            if uniform.update_uniform != null
+            {
+                uniform.update_uniform(uniform.location_id, uniform.uniform_data);
+            }
+        }
+        else
+        {
+            if working_group != null
+            {
+                if working_group.group_texture_count > 0
+                {
+                    if uniform.type == .TEXTURE_BINDING
+                    {
+                        for texture_index: 0..working_group.group_texture_count - 1
+                        {
+                            texture_id := working_group.texture_ids[texture_index];
+                            glActiveTexture(GL_TEXTURE0 + texture_id);
+                            glBindTexture(GL_TEXTURE_2D, texture_id);
+                        }
+                        
+                        sampler_units: [MAX_TEXTURE_SLOTS]s32;
+                        for binding: 0..MAX_TEXTURE_SLOTS - 1
+                        {
+                            sampler_units[binding] = xx binding;
+                        }
+                        glUniform1iv(uniform.location_id, MAX_TEXTURE_SLOTS, sampler_units.data);
+                    }
+                    else
+                    {
+                        assert(uniform.type == .TEXTURE_ARRAY);
+                        log("[ERROR]: Support for GPU_Shader texture arrays is not implemented...\n");
 
-            glGenTextures(1, *render_state.lighting_fbo_texture_id);
-            glBindTexture(GL_TEXTURE_2D, render_state.lighting_fbo_id);
-            
-            glTexImage2D(GL_TEXTURE_2D, 0, GL_SRGB_ALPHA, 1920, 1080, 0, GL_RGB, GL_FLOAT, null);
-            glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
-            glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
-
-            glFramebufferTexture2D(GL_FRAMEBUFFER,
-                                   GL_COLOR_ATTACHMENT0,
-                                   GL_TEXTURE_2D,
-                                   render_state.lighting_fbo_texture_id,
-                                   0);
-
-            color_attachments: GLenum = GL_COLOR_ATTACHMENT0;
-            glDrawBuffers(1, *color_attachments);
-
-            glGenRenderbuffers(1, *render_state.lighting_rbo_stencil_buffer_id);
-            glBindRenderbuffer(GL_RENDERBUFFER, render_state.lighting_rbo_stencil_buffer_id);
-            glRenderbufferStorage(GL_RENDERBUFFER, GL_DEPTH_COMPONENT, 1920, 1080);
-            glFramebufferRenderbuffer(GL_FRAMEBUFFER,
-                                      GL_DEPTH_ATTACHMENT,
-                                      GL_RENDERBUFFER,
-                                      render_state.lighting_rbo_stencil_buffer_id);
-
-            glBindFramebuffer(GL_FRAMEBUFFER, 0);
-            glBindRenderbuffer(GL_RENDERBUFFER, 0);
-            glBindTexture(GL_TEXTURE_2D, 0);
+                        assert(false);
+                    }
+                }
+            }
         }
     }
 
-    r_default_render_material = asset_get_render_material(asset_manager, "Default_Material");
+    for ubo_index: 0..shader.UBO_buffer_data.count - 1
+    {
+        UBO_data := *shader.UBO_buffer_data[ubo_index];
+        assert(UBO_data.buffer_binding != -1);
+        assert(UBO_data.update_buffer  != null);
+        UBO_data.update_buffer(UBO_data.location_id,
+                               UBO_data.buffer_size,
+                               UBO_data.buffer_data);
+    }
 
-    return render_state;
+    for buffer_index: 0..shader.SBO_buffer_data.count - 1
+    {
+        shader_buffer := *shader.SBO_buffer_data[buffer_index];
+        assert(shader_buffer.buffer_binding != -1);
+        if !shader_buffer.read_only
+        {
+            assert(shader_buffer.update_buffer  != null);
+            shader_buffer.update_buffer(shader_buffer.location_id,
+                                        shader_buffer.buffer_size,
+                                        shader_buffer.buffer_data);
+        }
+    }
 }
 
 #no_reset uploaded_debug_texture: bool = false;
 r_render_group_test_render :: (render_state: *Render_State, asset_manager: *Asset_Manager)
 {
     render_state.draw_frame.active_render_material = r_default_render_material;
-    render_state.draw_frame.point_light_buffer = c_arena_push_array(*render_state.draw_frame_arena, Point_Light, 50);
+    render_state.draw_frame.point_light_buffer = c_arena_push_array(*render_state.draw_frame_arena, Point_Light, MAX_LIGHTS);
 
     render_state.draw_frame.active_shader            = asset_get_shader(asset_manager, "Basic_Shader");
     render_state.draw_frame.active_view_matrix       = mat4_identity();
-    render_state.draw_frame.active_projection_matrix = orthographic_projection_matrix(1920 * -0.5,
-                                                                                      1920 *  0.5,
-                                                                                      1080 * -0.5,
-                                                                                      1080 *  0.5,
+    render_state.draw_frame.active_projection_matrix = orthographic_projection_matrix(global_window_data.current_window_size.x * -0.5,
+                                                                                      global_window_data.current_window_size.x *  0.5,
+                                                                                      global_window_data.current_window_size.y * -0.5,
+                                                                                      global_window_data.current_window_size.y *  0.5,
                                                                                      -1.0,
                                                                                       1.0);
     r_push_render_layer(render_state, 17);
@@ -849,7 +1045,7 @@ r_render_group_test_render :: (render_state: *Render_State, asset_manager: *Asse
     r_draw_quad(render_state,   .{-175, -125}, .{ 50,  50}, .{0, 0, 1, 0.8});
 
     font      := asset_get_font(asset_manager, "LiberationMono-Regular");
-    r_draw_text(render_state, font, "This is a test", .{-250, 0}, 64, .{1, 1, 1, 1});
+    r_draw_text(render_state, font, "Let's go crazy with it.", .{-250, 0}, 64, .{1, 1, 1, 1});
 
     // for 0..10000
     // {
@@ -861,25 +1057,102 @@ r_render_group_test_render :: (render_state: *Render_State, asset_manager: *Asse
     //     r_draw_quad(render_state,   .{-200, -150}, .{100, 100}, .{1, 0, 1, 1},   texture.texID, .RO_NONE, deg_to_rad(33));
     // }
 
-    light  := r_create_point_light(render_state, .{ 250, 0}, .{0.30, 0.30, 0.30, 1.0}, .{ 0, 1},  deg_to_rad(45), 500, 1.0);
-    light2 := r_create_point_light(render_state, .{-250, 0}, .{0.30, 0.30,  0.30, 1.0}, .{1, 0}, deg_to_rad(180), 500, 1.0);
+    light  := r_create_point_light(render_state, .{ 500, 100}, .{0.30, 0.30, 0.30, 1.0}, .{ 0, 1},  deg_to_rad(45), 500, 1.0);
+    light2 := r_create_point_light(render_state, .{ 250, 100}, .{1.0, 0.00,  0.00, 1.0}, .{1, 0}, deg_to_rad(180), 500, 2.0);
+
+    // for 0..100
+    // {
+    //     light3 := r_create_point_light(render_state, .{-250, 0}, .{0.70, 0.30,  0.30, 1.0}, .{1, 0}, deg_to_rad(180), 500, 1.0);
+    // }
     
-    glStencilOp(GL_KEEP, GL_KEEP, GL_REPLACE);  
-    glStencilFunc(GL_ALWAYS, 1, 0xFF); // all fragments should pass the stencil test
-    glStencilMask(0xFF); // enable writing to the stencil buffer
-    
-    glViewport(0, 0, 1920, 1080);
+    glViewport(0, 0, xx global_window_data.current_window_size.x, xx global_window_data.current_window_size.y);
     glClearColor(0.0, 0.0, 0.0, 1.0);
     glClearDepth(0.0);
     glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT | GL_STENCIL_BUFFER_BIT);
 
-    glBindVertexArray(render_state.primary_vao_id);
+    // NOTE(Sleepster): Clustered Lighting Compute Shader 
+    if render_state.draw_frame.point_light_count > 0
+    {
+        window_size           := global_window_data.current_window_size;
+        light_indices_size    := size_of(s32) * ((window_size.x / 16) * (window_size.y / 16)) * MAX_LIGHTS_PER_TILE_CLUSTER;
+        tile_light_count_size := size_of(s32) * ((window_size.x / 16) * (window_size.y / 16));
 
-    ambient_factor: float32 = 0.1;
+        screen_tile_size := (Vector2).{xx ((window_size.x + 15) / 16), xx ((window_size.y + 15) / 16)};
+        
+        shader := render_state.lighting_cluster_compute_shader;
+        if global_window_data.current_window_size != global_window_data.old_window_size
+        {
+            r_resize_render_data(render_state);
+
+            shader.resize_shader_buf(shader, "LightIndicesSBO", light_indices_size);
+            shader.resize_shader_buf(shader, "TileLightCountSBO", tile_light_count_size);
+        }
+        TileSize: s32 = 16;
+        max_lights_per_cluster: s32 = MAX_LIGHTS_PER_TILE_CLUSTER;
+        
+        glUseProgram(render_state.lighting_cluster_compute_shader.program_id);
+        shader.update_uniform(shader,
+                              "uLightCount",
+                             *render_state.draw_frame.point_light_count);
+        shader.update_uniform(shader,
+                              "uTileSize",
+                             *TileSize);
+        shader.update_uniform(shader,
+                              "uMaxLightsPerTileCluster",
+                             *max_lights_per_cluster);
+        shader.update_uniform(shader,
+                              "uScreenTileSize",
+                             *screen_tile_size);
+        shader.update_buffer(shader,
+                             "PointLightSBO",
+                             size_of(Point_Light) * render_state.draw_frame.point_light_count,
+                             render_state.draw_frame.point_light_buffer.data);
+
+        r_update_shader_data(null, shader);
+        glDispatchCompute(xx screen_tile_size.x, xx screen_tile_size.y, 1);
+    }
+
+    glBindVertexArray(render_state.primary_vao_id);
+    ambient_factor: float32 = 0.3;
+
+    // NOTE(Sleepster): Lighting Setup Pass
+    default_view_matrix := Matrix4_Identity;
+    if render_state.draw_frame.point_light_count > 0
+    {
+        lightmap_shader := asset_get_shader(asset_manager, "Lightmap_Render_Pass_Shader");
+        glBindFramebuffer(GL_FRAMEBUFFER, render_state.lighting_fbo_id);
+
+        window_size: Vector2 = v2_cast(global_window_data.current_window_size);
+
+        glUseProgram(lightmap_shader.program_id);
+        lightmap_shader.update_uniform(lightmap_shader,
+                                       "uPointLightCount",
+                                      *render_state.draw_frame.point_light_count);
+        lightmap_shader.update_uniform(lightmap_shader,
+                                       "uScreenSize",
+                                      *window_size);
+        lightmap_shader.update_buffer(lightmap_shader,
+                                     "PointLightSBO",
+                                     size_of(Point_Light) * render_state.draw_frame.point_light_count,
+                                     render_state.draw_frame.point_light_buffer.data);
+        r_update_shader_data(null, lightmap_shader);
+
+        glDrawArrays(GL_TRIANGLES, 0, 6);
+        glBindFramebuffer(GL_FRAMEBUFFER, 0);
+    }
+    
+    // NOTE(Sleepster): Primary Geometry Pass 
     r_handle_group_buffers(render_state);
     for group_index: 0..render_state.draw_frame.render_group_counter - 1
     {
         working_group := render_state.draw_frame.render_groups[group_index];
+        shader := working_group.bound_shader;
+        glUseProgram(shader.program_id);
+
+        // NOTE(Sleepster): This would be done by the game programmer
+        // during their game update. This information is a form of
+        // deferred updating, simply REGISTERING the data. At render
+        // time, and no earlier, this data is sent to the GPU.
         working_group.bound_shader.update_uniform(working_group.bound_shader,
                                                   "uProjectionMatrix",
                                                  *working_group.projection_matrix._11);
@@ -908,84 +1181,7 @@ r_render_group_test_render :: (render_state: *Render_State, asset_manager: *Asse
                         working_group.vertex_buffer.data);
 
         glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, render_state.primary_ebo_id);
-
-        shader := working_group.bound_shader;
-        glUseProgram(shader.program_id);
-        
-        for uniform_index: 0..shader.uniform_data.count - 1
-        {
-            uniform := *shader.uniform_data[uniform_index];
-            if uniform.type != .TEXTURE_BINDING && uniform.type != .TEXTURE_ARRAY
-            {
-                if uniform.update_uniform != null
-                {
-                    uniform.update_uniform(uniform.location_id, uniform.uniform_data);
-                }
-            }
-            else
-            {
-                if working_group.group_texture_count > 0
-                {
-                    if uniform.type == .TEXTURE_BINDING
-                    {
-                        for texture_index: 0..working_group.group_texture_count - 1
-                        {
-                            texture_id := working_group.texture_ids[texture_index];
-                            glActiveTexture(GL_TEXTURE0 + texture_id);
-                            glBindTexture(GL_TEXTURE_2D, texture_id);
-                        }
-                        
-                        sampler_units: [MAX_TEXTURE_SLOTS]s32;
-                        for binding: 0..MAX_TEXTURE_SLOTS - 1
-                        {
-                            sampler_units[binding] = xx binding;
-                        }
-                        glUniform1iv(uniform.location_id, MAX_TEXTURE_SLOTS, sampler_units.data);
-                    }
-                    else
-                    {
-                        // TODO(Sleepster): This doesn't actually work... 
-                        assert(uniform.type == .TEXTURE_ARRAY);
-                        if uniform.location_id != -1
-                        {
-                            for texture_index: 0..working_group.group_texture_count - 1
-                            {
-                                texture_id := working_group.texture_ids[texture_index];
-                                glActiveTexture(GL_TEXTURE0 + texture_id);
-                                glBindTexture(GL_TEXTURE_2D, texture_id);
-                            }
-                            
-                            sampler_units: [MAX_TEXTURE_SLOTS]s32;
-                            for binding: 0..MAX_TEXTURE_SLOTS - 1
-                            {
-                                sampler_units[binding] = xx binding;
-                            }
-                            glUniform1iv(uniform.location_id, MAX_TEXTURE_SLOTS, sampler_units.data);
-                        }
-                    }
-                }
-            }
-        }
-
-        for ubo_index: 0..shader.UBO_buffer_data.count - 1
-        {
-            UBO_data := *shader.UBO_buffer_data[ubo_index];
-            assert(UBO_data.buffer_binding != -1);
-            assert(UBO_data.update_buffer  != null);
-            UBO_data.update_buffer(UBO_data.location_id,
-                                   UBO_data.buffer_size,
-                                   UBO_data.buffer_data);
-        }
-
-        for buffer_index: 0..shader.SBO_buffer_data.count - 1
-        {
-            shader_buffer := *shader.SBO_buffer_data[buffer_index];
-            assert(shader_buffer.buffer_binding != -1);
-            assert(shader_buffer.update_buffer  != null);
-            shader_buffer.update_buffer(shader_buffer.location_id,
-                                        shader_buffer.buffer_size,
-                                        shader_buffer.buffer_data);
-        }
+        r_update_shader_data(working_group, shader);
         if opaque_quad_count > 0
         {
             glDepthFunc(GL_GREATER);
@@ -995,8 +1191,6 @@ r_render_group_test_render :: (render_state: *Render_State, asset_manager: *Asse
                            GL_UNSIGNED_INT,
                            null);
         }
-
-        // TODO(Sleepster): LIGHTING AND SHADOW STUFF GOES HERE 
         if working_group.t_quad_count > 0
         {
             glDepthFunc(GL_GEQUAL);
@@ -1006,6 +1200,10 @@ r_render_group_test_render :: (render_state: *Render_State, asset_manager: *Asse
                            GL_UNSIGNED_INT,
                            cast(*void)((opaque_quad_count * 6) * size_of(u32)));
         }
+    }
+
+    // NOTE(Sleepster): Geometry and Lighting Mixing Here. 
+    {
     }
 }
 

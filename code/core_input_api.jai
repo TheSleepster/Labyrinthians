@@ -21,7 +21,7 @@ Input_Manager :: struct
 };
 
 // TODO(Sleepster): Window size event 
-c_handle_input_events :: (input_manager: *Input_Manager)
+c_handle_window_events :: (input_manager: *Input_Manager)
 {
     event: SDL_Event;
     while SDL_PollEvent(*event)
@@ -30,16 +30,17 @@ c_handle_input_events :: (input_manager: *Input_Manager)
         {
             case SDL_QUIT;
             {
+                d_end_all_profiling_and_report();
                 os_exit_process();
             }
             case SDL_WINDOWEVENT;
             {
                 if event.window.event == SDL_WINDOWEVENT_SIZE_CHANGED 
                 {
-                    // SDL_GetWindowSize(window_data.window,
-                    //                   *window_data.window_size.x,
-                    //                   *window_data.window_size.y);
-
+                    global_window_data.old_window_size = global_window_data.current_window_size;
+                    SDL_GL_GetDrawableSize(global_window_data.window,
+                                          *global_window_data.current_window_size.x,
+                                          *global_window_data.current_window_size.y);
                 }
             }
 

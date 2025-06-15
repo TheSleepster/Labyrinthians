@@ -85,7 +85,6 @@ c_hash_get_value :: (table: *C_Hash_Table, key: string) -> *void
     }
     else
     {
-        log("[ERROR]: hash table does not contain a valid string at index '%', which key '%' gave...\n", hash_index, key);
         return null;
     }
 }

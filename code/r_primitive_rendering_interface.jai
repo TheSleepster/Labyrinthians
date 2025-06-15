@@ -20,7 +20,7 @@ Render_Primitive_Data :: struct
 
 Render_Line :: struct
 {
-    #as using primitive_data: Render_Primitive_Data;
+    using primitive_data: Render_Primitive_Data;
     union
     {
         elements: [2]Vertex;
@@ -34,7 +34,7 @@ Render_Line :: struct
 
 Render_Triangle :: struct
 {
-    #as using primitive_data: Render_Primitive_Data;
+    using primitive_data: Render_Primitive_Data;
     union
     {
         elements: [3]Vertex;
@@ -49,7 +49,7 @@ Render_Triangle :: struct
 
 Render_Quad :: struct
 {
-    #as using primitive_data: Render_Primitive_Data;
+    using primitive_data: Render_Primitive_Data;
     union
     {
         elements: [4]Vertex;
@@ -258,6 +258,8 @@ r_create_point_light :: (render_state: *Render_State,
                          radius      :  float32,
                          strength    :  float32 = 1.0) -> *Point_Light
 {
+    assert(render_state.draw_frame.point_light_count + 1 < MAX_LIGHTS);
+    
     point_light := *render_state.draw_frame.point_light_buffer[render_state.draw_frame.point_light_count];
     point_light.light_color = light_color;
 
@@ -286,7 +288,7 @@ r_prepare_string :: (varient: *Dynamic_Render_Font_Varient, text: string) -> s32
         char.count = 1;
         
         glyph      = asset_get_font_glyph(varient, temp);
-        result    += glyph.glyph_data.atlas_size.x + glyph.advance;
+        result    += xx (glyph.glyph_data.atlas_size.x + xx glyph.advance);
         temp       = unicode_next_character(temp);
     }
     
@@ -335,7 +337,7 @@ r_draw_text :: (render_state: *Render_State,
             }
             glyph.glyph_data.atlas_texture = *glyph.owner_page.texture_data;
             r_draw_sprite(render_state,
-                         (Vector2).{floor(render_pos.x + glyph.offset_x), floor(render_pos.y + (glyph.ascent - glyph.glyph_data.atlas_size.y))},
+                         (Vector2).{floor(render_pos.x + glyph.offset_x), floor(render_pos.y + (glyph.ascent - xx glyph.glyph_data.atlas_size.y))},
                          .{xx glyph.glyph_data.atlas_size.x, xx glyph.glyph_data.atlas_size.y},
                           color,
                          *glyph.glyph_data,

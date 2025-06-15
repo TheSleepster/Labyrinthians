@@ -50,14 +50,14 @@ ab_add_bitmap_to_atlas :: (atlas_builder: *Atlas_Builder,
     {
         for y: 0..sprite_data.atlas_size.y - 1
         {
-            atlas_texture_data_offset := ((sprite_data.atlas_offset.y + y)  * atlas_builder.atlas_bitmap.width +
-                                          (sprite_data.atlas_offset.x + x)) * atlas_builder.atlas_bitmap.channels;
+            atlas_texture_data_offset := ((sprite_data.atlas_offset.y + y)  * xx atlas_builder.atlas_bitmap.width +
+                                          (sprite_data.atlas_offset.x + x)) * xx atlas_builder.atlas_bitmap.channels;
 
             sprite_texture_data_offset := (y * sprite_data.atlas_size.x + x) * xx sprite_data.parent_texture.bitmap.channels;
             for channel_index: 0..sprite_data.parent_texture.bitmap.channels - 1
             {
-                atlas_builder.atlas_bitmap.data[atlas_texture_data_offset + channel_index] =
-                    sprite_data.parent_texture.bitmap.data[sprite_texture_data_offset + channel_index];
+                atlas_builder.atlas_bitmap.data[xx atlas_texture_data_offset + channel_index] =
+                    sprite_data.parent_texture.bitmap.data[xx sprite_texture_data_offset + channel_index];
             }
         }
     }
