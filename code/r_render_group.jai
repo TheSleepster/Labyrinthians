@@ -177,6 +177,11 @@ r_handle_group_buffers :: (render_state: *Render_State)
     draw_frame.render_groups = c_arena_push_array(*render_state.draw_frame_arena, *Render_Group, MAX_RENDER_GROUPS);
     render_group_hash_table := c_arena_push_array(*render_state.draw_frame_arena, *Render_Group, MAX_RENDER_GROUPS * 4);
 
+    if draw_frame.quad_buffers.quad_count == 0
+    {
+        return;
+    }
+
     current_quad_buffer := *draw_frame.quad_buffers;
     while current_quad_buffer != null
     {
@@ -278,6 +283,7 @@ r_handle_group_buffers :: (render_state: *Render_State)
         current_quad_buffer = current_quad_buffer.next_buffer;
     }
 
+    // TODO(Sleepster): Multithreading 
     for group_index: 0..draw_frame.render_group_counter - 1
     {
         working_group := draw_frame.render_groups[group_index];

@@ -218,7 +218,7 @@ main()
         vec2( 1,  1), // Top-right
     };
 
-    gl_Position   = vec4(Vertices[gl_VertexID], 0.0, 1.0);
+    gl_Position = vec4(Vertices[gl_VertexID], 0.0, 1.0);
 }
 #endif
 

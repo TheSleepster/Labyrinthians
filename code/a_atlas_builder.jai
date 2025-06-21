@@ -57,7 +57,7 @@ ab_add_bitmap_to_atlas :: (atlas_builder: *Atlas_Builder,
             for channel_index: 0..sprite_data.parent_texture.bitmap.channels - 1
             {
                 atlas_builder.atlas_bitmap.data[xx atlas_texture_data_offset + channel_index] =
-                    sprite_data.parent_texture.bitmap.data[xx sprite_texture_data_offset + channel_index];
+                   sprite_data.parent_texture.bitmap.data[xx sprite_texture_data_offset + channel_index];
             }
         }
     }

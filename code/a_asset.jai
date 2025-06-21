@@ -547,6 +547,7 @@ font_find_next_atlas_line :: inline (page: *Dynamic_Render_Font_Page, width: u32
         return .{xx page.bitmap_cursor_x, xx page.bitmap_cursor_y};
     }
 }
+
 copy_glyph_to_page_bitmap :: (page: *Dynamic_Render_Font_Page, glyph: *Font_Glyph_Data)
 {
     if page.texture_data.bitmap.data == null

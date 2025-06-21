@@ -72,19 +72,46 @@ r_create_draw_quad :: (render_state  : *Render_State,
                        rotation      :  float32,
                        render_options:  u32,
                        atlas_offset  :  Vector2,
-                       sprite_size   :  Vector2) -> Render_Quad
+                       sprite_size   :  Vector2) -> bool, Render_Quad
 {
+    culled: bool;
+    
     quad: Render_Quad;
     quad.world_position = position;
     quad.render_size    = render_size;
     quad.render_color   = draw_color;
     quad.rotation       = rotation;
+
+    top    := position.y;
+    bottom := position.y + render_size.y;
+    left   := position.x;
+    right  := position.x + render_size.x;
+
+    top_left     := (Vector2).{left,   top};
+    top_right    := (Vector2).{right,  top};
+    bottom_left  := (Vector2).{left,   bottom};
+    bottom_right := (Vector2).{right, bottom};
+
+    // NOTE(Sleepster): early culling 
+    world_to_clip := multiply(render_state.draw_frame.active_projection_matrix, render_state.draw_frame.active_view_matrix);
+    quad_min      := mat4_transform(world_to_clip, v2_expand(top_left, 0, 1));
+    quad_max      := mat4_transform(world_to_clip, v2_expand(bottom_right, 0, 1));
+
+    if quad_max.x < -1 || quad_min.x > 1 ||
+       quad_max.y < -1 || quad_min.y > 1
+    {
+        culled = true;
+        return culled, (Render_Quad).{};
+    }
+    
+    // NOTE(Sleepster): transparency 
     if quad.render_color.w < 1.0
     {
         quad.is_transparent = 1;
         quad_buffer.t_quad_count += 1;
     }
 
+    // NOTE(Sleepster): draw_frame matrix stuff 
     if (render_state.draw_frame.active_view_matrix       != render_state.draw_frame.previous_view_matrix) ||
        (render_state.draw_frame.active_projection_matrix != render_state.draw_frame.previous_projection_matrix)
     {
@@ -103,16 +130,6 @@ r_create_draw_quad :: (render_state  : *Render_State,
     quad.required_shader          =  render_state.draw_frame.active_shader;
     quad.required_render_material =  render_state.draw_frame.active_render_material;
     quad.required_shader_id       =  quad.required_shader.program_id;
-
-    top    := position.y;
-    bottom := position.y + render_size.y;
-    left   := position.x;
-    right  := position.x + render_size.x;
-
-    top_left     := (Vector2).{left,   top};
-    top_right    := (Vector2).{right,  top};
-    bottom_left  := (Vector2).{left,   bottom};
-    bottom_right := (Vector2).{right, bottom};
 
     quad.required_texture_id     = texture_id;
     quad.render_layer            = render_state.draw_frame.current_render_layer;
@@ -195,7 +212,7 @@ r_create_draw_quad :: (render_state  : *Render_State,
         element.vVSNormals     = .{0, 0, 1};
     }
 
-    return quad;
+    return culled, quad;
 }
 
 // NOTE(Sleepster): Pass Radians to these functions
@@ -209,19 +226,21 @@ r_draw_quad :: (render_state  : *Render_State,
 {
     assert(!(render_options & .RO_TEXEL_FETCHED));
     current_buffer := r_get_render_group_quad_buffer(render_state);
-    render_quad    := r_create_draw_quad(render_state,
-                                         current_buffer,
-                                         position,
-                                         render_size,
-                                         draw_color,
-                                         texture_id,
-                                         rotation,
-                                      xx render_options,
-                                        (Vector2).{},
-                                        (Vector2).{});
-
-    current_buffer.quad_buffer[current_buffer.quad_count] = render_quad;
-    current_buffer.quad_count += 1;
+    culled, render_quad    := r_create_draw_quad(render_state,
+                                                 current_buffer,
+                                                 position,
+                                                 render_size,
+                                                 draw_color,
+                                                 texture_id,
+                                                 rotation,
+                                              xx render_options,
+                                                 (Vector2).{},
+                                                 (Vector2).{});
+    if !culled
+    {
+        current_buffer.quad_buffer[current_buffer.quad_count] = render_quad;
+        current_buffer.quad_count += 1;
+    }
 }
 
 r_draw_sprite :: (render_state   : *Render_State,
@@ -234,19 +253,21 @@ r_draw_sprite :: (render_state   : *Render_State,
 {
     current_buffer := r_get_render_group_quad_buffer(render_state);
     render_options |= .RO_TEXEL_FETCHED;
-    render_quad := r_create_draw_quad(render_state,
-                                      current_buffer,
-                                      position,
-                                      render_size,
-                                      draw_color,
-                                      atlas_sprite.atlas_texture.texID,
-                                      rotation,
-                                   xx render_options,
-                                      v2_cast(atlas_sprite.atlas_offset),
-                                      v2_cast(atlas_sprite.atlas_size));
-
-    current_buffer.quad_buffer[current_buffer.quad_count] = render_quad;
-    current_buffer.quad_count += 1;
+    culled, render_quad := r_create_draw_quad(render_state,
+                                              current_buffer,
+                                              position,
+                                              render_size,
+                                              draw_color,
+                                              atlas_sprite.atlas_texture.texID,
+                                              rotation,
+                                           xx render_options,
+                                              v2_cast(atlas_sprite.atlas_offset),
+                                              v2_cast(atlas_sprite.atlas_size));
+    if !culled
+    {
+        current_buffer.quad_buffer[current_buffer.quad_count] = render_quad;
+        current_buffer.quad_count += 1;
+    }
 }
 
 // NOTE(Sleepster): Angle is in radians 
@@ -262,6 +283,15 @@ r_create_point_light :: (render_state: *Render_State,
     
     point_light := *render_state.draw_frame.point_light_buffer[render_state.draw_frame.point_light_count];
     point_light.light_color = light_color;
+
+    world_to_clip := multiply(render_state.draw_frame.active_projection_matrix, render_state.draw_frame.active_view_matrix);
+    NDC_position  := mat4_transform(world_to_clip, v2_expand(position, 0, 1));
+    if NDC_position.x < -1 || NDC_position.x > 1 ||
+       NDC_position.y < -1 || NDC_position.y > 1
+    {
+        log("[INFO]: Light Culled...\n");
+        return null;
+    }
 
     point_light_pos        := mat4_transform(render_state.draw_frame.active_view_matrix, v2_expand(position, 0, 1));
     point_light.vs_position = point_light_pos.xy;
