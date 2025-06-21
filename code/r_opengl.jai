@@ -30,6 +30,9 @@ ENGINE_TEXTURE_SIZE         :: 2048;
 
 r_default_render_material: *Render_Material;
 
+// TODO(Sleepster): Put this somewhere safe. 
+#no_reset ambient_factor: float32 = 0.3;
+
 // NOTE(Sleepster): VS = view space 
 Point_Light :: struct
 {
@@ -1124,7 +1127,6 @@ DEBUG_draw_test_sprites :: (render_state: *Render_State, asset_manager: *Asset_M
     render_state.draw_frame.active_shader.update_uniform(render_state.draw_frame.active_shader,
                                                        "uPointLightCount",
                                                        *render_state.draw_frame.point_light_count);
-    ambient_factor: float32 = 0.3;
     render_state.draw_frame.active_shader.update_uniform(render_state.draw_frame.active_shader,
                                                         "uAmbientLighting",
                                                         *ambient_factor);
