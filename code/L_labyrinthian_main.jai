@@ -71,9 +71,11 @@ L_labyrinthian_main :: ()
             d_profile_scope();
             c_handle_window_events(*input_manager);
 
-            //r_test_render(*render_state);
             DEBUG_draw_test_sprites(*render_state, *asset_manager);
-            r_render_group_test_render(*render_state, *asset_manager);
+
+            //r_render_group_test_render(*render_state, *asset_manager);
+            advanced_forward_rendering_test(*render_state, *asset_manager);
+
             SDL_GL_SwapWindow(global_window_data.window);
 
             reset_temporary_storage();

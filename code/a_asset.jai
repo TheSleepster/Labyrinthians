@@ -224,6 +224,7 @@ Texture2D :: struct
     // NOTE(Sleepster): will be null if this texture is not an atlas... 
     atlas_data : *Texture_Atlas_Data;
     is_in_atlas:  bool;
+    is_gpu_tex :  bool;
 };
 
 asset_synchronous_load_texture_data :: inline (asset_slot: *Asset_Slot)
@@ -292,6 +293,16 @@ asset_free_texture_bitmap_data :: (asset_manager: *Asset_Manager, hash_name: str
         log("[ERROR]: Texture with key '%' is not a valid key...\n", hash_name);
         assert(false);
     }
+}
+
+asset_delete_texture :: inline (asset_manager: *Asset_Manager, texture: *Texture2D)
+{
+    assert(texture.texID > 0);
+
+    glDeleteTextures(1, *texture.texID);
+    asset_free_texture_bitmap_data(asset_manager, texture.hash_name);
+
+    texture.is_gpu_tex = false;
 }
 
 // TODO(Sleepster): Hey, is this no-initialize idea good? 

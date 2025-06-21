@@ -30,6 +30,7 @@ ENGINE_TEXTURE_SIZE         :: 2048;
 
 r_default_render_material: *Render_Material;
 
+#no_reset uploaded_debug_texture: bool = false;
 // TODO(Sleepster): Put this somewhere safe. 
 #no_reset ambient_factor: float32 = 0.3;
 
@@ -44,6 +45,18 @@ Point_Light :: struct
     strength   : float32;
     padding    : float32;
 }#no_padding;
+
+/*
+TODO(Sleepster): Maybe we don't need texelFetch? Maybe it's even better to not have it
+
+https://jorenjoestar.github.io/post/pixel_art_filtering/
+https://youtu.be/Yu8k7a1hQuU?si=RGvJRsBsLU9JyWVw&t=5473
+
+However it might not work better specifically with OpenGL since the driver
+might interperet the texels with a 0.5 texel of error. OpenGL sucks.
+
+https://handmade.network/forums/t/7883-pixel_art_fragment_shader
+*/
 
 Rendering_Options :: enum u32
 {
@@ -746,6 +759,7 @@ r_upload_texture_to_gpu :: (texture: *Texture2D, filter_type: Filter_Type = .NEA
                      GL_RGBA, GL_UNSIGNED_BYTE, texture.bitmap.data);
         glBindTexture(GL_TEXTURE_2D, 0);
 
+        texture.is_gpu_tex = true;
         return true;
     }
     else
@@ -789,6 +803,60 @@ r_update_gpu_texture_from_bitmap :: (texture: *Texture2D) -> bool
 
     texture.bitmap.is_dirty = false;
     return true;
+}
+
+r_resize_framebuffers :: (render_state: *Render_State, window_size: iVector2)
+{
+    // NOTE(Sleepster): FIRST FRAMEBUFFER
+    {
+        // NOTE(Sleepster): COLOR ATTACHMENT 0 (Normals Texture) 
+        {
+            normals_texture := render_state.lighting_fbo_normals_texture;
+            glBindTexture(GL_TEXTURE_2D, normals_texture);
+            glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA8, xx window_size.x, xx window_size.y, 0, GL_RGBA, GL_UNSIGNED_BYTE, null);
+            glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
+            glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
+        }
+
+        // NOTE(Sleepster): COLOR ATTACHMENT 1 (Shadow caster masking texture) 
+        {
+            shadow_caster_mask := render_state.lighting_fbo_shadow_caster_tex;
+            glBindTexture(GL_TEXTURE_2D, shadow_caster_mask);
+            glTexImage2D(GL_TEXTURE_2D, 0, GL_R8, xx window_size.x, xx window_size.y, 0, GL_RED, GL_UNSIGNED_BYTE, null);
+            glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
+            glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
+        }
+
+        // NOTE(Sleepster): DEPTH ATTACHMENT
+        {
+            depth_texture := render_state.lighting_fbo_depth_attachment;
+            glBindTexture(GL_TEXTURE_2D, depth_texture);
+            glTexImage2D(GL_TEXTURE_2D, 0, GL_DEPTH_COMPONENT24, xx window_size.x, xx window_size.y, 0, GL_DEPTH_COMPONENT, GL_FLOAT, null);
+            glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
+            glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
+        }
+    }
+
+    // NOTE(Sleepster): SECOND FRAMEBUFFER 
+    {
+        // NOTE(Sleepster): FORWARD RENDERING TEXTURE 
+        {
+            forward_texture := render_state.forward_rendering_texture;
+            glBindTexture(GL_TEXTURE_2D, forward_texture);
+            glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA8, xx window_size.x, xx window_size.y, 0, GL_RGBA, GL_UNSIGNED_BYTE, null);
+            glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
+            glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
+        }
+
+        // NOTE(Sleepster): FORWARD DEPTH TEXTURE 
+        {
+            depth_texture := render_state.forward_rendering_depth_texture;
+            glBindTexture(GL_TEXTURE_2D, depth_texture);
+            glTexImage2D(GL_TEXTURE_2D, 0, GL_DEPTH_COMPONENT24, xx window_size.x, xx window_size.y, 0, GL_DEPTH_COMPONENT, GL_FLOAT, null);
+            glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
+            glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
+        }
+    }
 }
 
 r_init_renderer_data :: (window: *SDL_Window, asset_manager: *Asset_Manager) -> Render_State
@@ -885,7 +953,6 @@ r_init_renderer_data :: (window: *SDL_Window, asset_manager: *Asset_Manager) -> 
         }
 
         window_size := global_window_data.current_window_size;
-
         // NOTE(Sleepster): Lighting Framebuffer data init 
         {
             glGenFramebuffers(1, *render_state.lighting_fbo_id);
@@ -1144,7 +1211,6 @@ DEBUG_draw_test_sprites :: (render_state: *Render_State, asset_manager: *Asset_M
     
 }
 
-#no_reset uploaded_debug_texture: bool = false;
 r_render_group_test_render :: (render_state: *Render_State, asset_manager: *Asset_Manager)
 {
     glViewport(0, 0, xx global_window_data.current_window_size.x, xx global_window_data.current_window_size.y);
@@ -1159,10 +1225,7 @@ r_render_group_test_render :: (render_state: *Render_State, asset_manager: *Asse
         light_indices_size    := size_of(s32) * ((window_size.x / 16) * (window_size.y / 16)) * MAX_LIGHTS_PER_TILE_CLUSTER;
         tile_light_count_size := size_of(s32) * ((window_size.x / 16) * (window_size.y / 16));
 
-        // NOTE(Sleepster): What the fuck? for some reason the compiler is writing to the value at
-        // render_state.draw_frame.active_shader.uniform_data.data.uniform_data;
-        screen_tile_size: Vector2;
-        screen_tile_size = (Vector2).{xx ((window_size.x + 15) / 16), xx ((window_size.y + 15) / 16)};
+        screen_tile_size := (Vector2).{xx ((window_size.x + 15) / 16), xx ((window_size.y + 15) / 16)};
         
         shader := render_state.lighting_cluster_compute_shader;
         if global_window_data.current_window_size != global_window_data.old_window_size
@@ -1235,14 +1298,6 @@ r_render_group_test_render :: (render_state: *Render_State, asset_manager: *Asse
     }
 }
 
-r_reset_draw_frame :: inline (render_state: *Render_State)
-{
-    c_arena_reset(*render_state.draw_frame_arena);
-    render_state.draw_frame.point_light_count    = 0;
-    render_state.draw_frame.current_render_layer = 32;
-    render_state.draw_frame                      = .{};
-}
-
 advanced_forward_rendering_test :: (render_state: *Render_State, asset_manager: *Asset_Manager)
 {
     // NOTE(Sleepster): First framebuffer, Rendering all opaque geometry. Writing Normals, Recording Depth, and writing shadow casters 
@@ -1310,5 +1365,21 @@ advanced_forward_rendering_test :: (render_state: *Render_State, asset_manager: 
 
     // NOTE(Sleepster): Blit final output to main Framebuffer, end of render.
     {
+    }
+}
+
+r_reset_draw_frame :: (render_state: *Render_State)
+{
+    c_arena_reset(*render_state.draw_frame_arena);
+    render_state.draw_frame.point_light_count    = 0;
+    render_state.draw_frame.current_render_layer = 32;
+    render_state.draw_frame                      = .{};
+
+    previous_window_size := global_window_data.old_window_size;
+    window_size          := global_window_data.current_window_size;
+
+    if window_size != previous_window_size
+    {
+        r_resize_framebuffers(render_state, global_window_data.current_window_size);
     }
 }

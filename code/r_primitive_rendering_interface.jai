@@ -156,6 +156,7 @@ r_create_draw_quad :: (render_state  : *Render_State,
         }
     }
 
+    // TODO(Sleepster): Maybe move the rotation math over to the GPU? 
     if rotation != 0
     {
         C_x := position.x + render_size.x / 2;
