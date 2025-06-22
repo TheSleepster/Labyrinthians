@@ -2,6 +2,7 @@ struct point_light
 {
     vec4                   Color;
     vec2                   vsPosition;
+    vec2                   csPosition;
     vec2                   Direction;
     float                  SpotAngle;
     float                  Radius;

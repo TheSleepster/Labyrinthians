@@ -2,11 +2,12 @@ struct point_light
 {
     vec4                   Color;
     vec2                   vsPosition;
+    vec2                   csPosition;
     vec2                   Direction;
     float                  SpotAngle;
     float                  Radius;
     float                  Strength; 
-    float                  padding;
+    float                  padding[3];
 };
 
 layout(local_size_x = 16, local_size_y = 16, local_size_z = 1) in;

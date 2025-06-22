@@ -5,11 +5,12 @@ struct point_light
 {
     vec4                   Color;
     vec2                   vsPosition;
+    vec2                   csPosition;
     vec2                   Direction;
     float                  SpotAngle;
     float                  Radius;
     float                  Strength; 
-    float                  padding;
+    float                  padding[3];
 };
 
 #ifdef VERTEX_SHADER
@@ -153,7 +154,7 @@ main()
             float Attenuation = CurrentStep * (1.0 - (LightDist / Light.Radius));
 
             float Shine            = Material.ShineStrength == 0.0 ? 128.0 : Material.ShineStrength;
-            vec3 ReflectDir        = reflect(-LightDir, Normal);
+            vec3  ReflectDir       = reflect(-LightDir, Normal);
             float SpecularLighting = pow(max(dot(Normal, ReflectDir), 0.0), Shine);
 
             float SpotStrength = SpotEffect * Light.Strength;

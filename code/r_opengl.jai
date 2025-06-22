@@ -39,12 +39,13 @@ Point_Light :: struct
 {
     light_color: Vector4;
     vs_position: Vector2;
+    cs_position: Vector2;
     direction  : Vector2;
     spot_angle : float32;
     radius     : float32;
     strength   : float32;
-    padding    : float32;
-}#no_padding;
+    padding    : [3]float32;
+};
 
 /*
 TODO(Sleepster): Maybe we don't need texelFetch? Maybe it's even better to not have it
@@ -63,6 +64,7 @@ Rendering_Options :: enum u32
     RO_NONE          :: 0x00;
     RO_TEXEL_FETCHED :: 0x01;
     RO_UNLIT         :: 0x02;
+    RO_SHADOW_CASTER :: 0x10;
 };
 
 Vertex :: struct
@@ -197,10 +199,10 @@ Render_State :: struct
     lighting_fbo_normals_texture   : u32;
 
     // NOTE(Sleepster): marks fragments with shadow casters 
-    lighting_fbo_shadow_caster_tex : u32;
+    lighting_fbo_occlusion_map     : u32;
     lighting_fbo_depth_attachment  : u32;
 
-    casted_shadows_texture         : u32;
+    lighting_fbo_shadow_map            : u32;
 
     // NOTE(Sleepster): FORWARD RENDERING FRAMEBUFFER
     forward_rendering_fbo_id       : u32;
@@ -399,7 +401,6 @@ gl_shader_update_uniform :: (shader: *GPU_Shader, uniform_name: string, data: *v
         assert(shader_uniform.update_uniform != null);
         assert(data != null);
 
-        shader_uniform.update_uniform(shader_uniform.location_id, data);
         shader_uniform.uniform_data = data;
     }
     else
@@ -561,7 +562,6 @@ assign_uniform_type :: inline (uniform: *GPU_Shader_Uniform, type: GLenum)
         case;
         {
             log_error("This uniform_type is not supported: '%'...\n", type);
-            assert(false);
         };
     };
 }
@@ -820,7 +820,7 @@ r_resize_framebuffers :: (render_state: *Render_State, window_size: iVector2)
 
         // NOTE(Sleepster): COLOR ATTACHMENT 1 (Shadow caster masking texture) 
         {
-            shadow_caster_mask := render_state.lighting_fbo_shadow_caster_tex;
+            shadow_caster_mask := render_state.lighting_fbo_occlusion_map;
             glBindTexture(GL_TEXTURE_2D, shadow_caster_mask);
             glTexImage2D(GL_TEXTURE_2D, 0, GL_R8, xx window_size.x, xx window_size.y, 0, GL_RED, GL_UNSIGNED_BYTE, null);
             glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
@@ -957,7 +957,7 @@ r_init_renderer_data :: (window: *SDL_Window, asset_manager: *Asset_Manager) -> 
         {
             glGenFramebuffers(1, *render_state.lighting_fbo_id);
             glGenTextures(1, *render_state.lighting_fbo_normals_texture);
-            glGenTextures(1, *render_state.lighting_fbo_shadow_caster_tex);
+            glGenTextures(1, *render_state.lighting_fbo_occlusion_map);
             glGenTextures(1, *render_state.lighting_fbo_depth_attachment);
             // NOTE(Sleepster): COLOR ATTACHMENT 0 (Normals Texture) 
             {
@@ -970,7 +970,7 @@ r_init_renderer_data :: (window: *SDL_Window, asset_manager: *Asset_Manager) -> 
 
             // NOTE(Sleepster): COLOR ATTACHMENT 1 (Shadow caster masking texture) 
             {
-                shadow_caster_mask := render_state.lighting_fbo_shadow_caster_tex;
+                shadow_caster_mask := render_state.lighting_fbo_occlusion_map;
                 glBindTexture(GL_TEXTURE_2D, shadow_caster_mask);
                 glTexImage2D(GL_TEXTURE_2D, 0, GL_R8, xx window_size.x, xx window_size.y, 0, GL_RED, GL_UNSIGNED_BYTE, null);
                 glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
@@ -988,7 +988,7 @@ r_init_renderer_data :: (window: *SDL_Window, asset_manager: *Asset_Manager) -> 
 
             glBindFramebuffer(GL_FRAMEBUFFER, render_state.lighting_fbo_id);
             glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, render_state.lighting_fbo_normals_texture, 0);
-            glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT1, GL_TEXTURE_2D, render_state.lighting_fbo_shadow_caster_tex, 0);
+            glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT1, GL_TEXTURE_2D, render_state.lighting_fbo_occlusion_map, 0);
             glFramebufferTexture2D(GL_FRAMEBUFFER, GL_DEPTH_ATTACHMENT,  GL_TEXTURE_2D, render_state.lighting_fbo_depth_attachment, 0);
 
             ColorAttachments: [2]GLenum = .[GL_COLOR_ATTACHMENT0, GL_COLOR_ATTACHMENT1];
@@ -1035,8 +1035,8 @@ r_init_renderer_data :: (window: *SDL_Window, asset_manager: *Asset_Manager) -> 
             glBindFramebuffer(GL_FRAMEBUFFER, 0);
 
             // NOTE(Sleepster): casted chadows texture 
-            glGenTextures(1, *render_state.casted_shadows_texture);
-            glBindTexture(GL_TEXTURE_2D, render_state.casted_shadows_texture);
+            glGenTextures(1, *render_state.lighting_fbo_shadow_map);
+            glBindTexture(GL_TEXTURE_2D, render_state.lighting_fbo_shadow_map);
 
             glTexImage2D(GL_TEXTURE_2D, 0, GL_R8, xx window_size.x, xx window_size.y, 0, GL_RED, GL_UNSIGNED_BYTE, null);
             glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
@@ -1051,7 +1051,7 @@ r_init_renderer_data :: (window: *SDL_Window, asset_manager: *Asset_Manager) -> 
     return render_state;
 }
 
-r_update_shader_data :: (working_group: *Render_Group, shader: *GPU_Shader)
+r_update_shader_data :: (working_group: *Render_Group, shader: *GPU_Shader, update_textures: bool = true)
 {
     for uniform_index: 0..shader.uniform_data.count - 1
     {
@@ -1067,7 +1067,7 @@ r_update_shader_data :: (working_group: *Render_Group, shader: *GPU_Shader)
         {
             if working_group != null
             {
-                if working_group.group_texture_count > 0
+                if working_group.group_texture_count > 0 && update_textures
                 {
                     if uniform.type == .TEXTURE_BINDING
                     {
@@ -1159,7 +1159,7 @@ DEBUG_draw_test_sprites :: (render_state: *Render_State, asset_manager: *Asset_M
     r_draw_sprite(render_state, .{-200,  150}, .{100, 100}, .{1, 0, 0, 1},   sprite, deg_to_rad(140));
     r_draw_quad(render_state,   .{ 200,  150}, .{100, 100}, .{0, 1, 0, 1},   texture.texID, 0);
     r_draw_quad(render_state,   .{ 200, -150}, .{100, 100}, .{0, 0, 1, 1},   texture.texID, 0);
-    r_draw_quad(render_state,   .{-200, -150}, .{100, 100}, .{1, 0, 1, 1},   texture.texID, .RO_NONE, deg_to_rad(33));
+    r_draw_quad(render_state,   .{-200, -150}, .{100, 100}, .{1, 0, 1, 1},   texture.texID, .RO_SHADOW_CASTER, deg_to_rad(33));
     r_draw_quad(render_state,   .{-200, -125}, .{ 50,  50}, .{1, 0, 0, 0.8});
     r_draw_quad(render_state,   .{-175, -125}, .{ 50,  50}, .{0, 0, 1, 0.8});
 
@@ -1256,6 +1256,8 @@ r_render_group_test_render :: (render_state: *Render_State, asset_manager: *Asse
 
         r_update_shader_data(null, shader);
         glDispatchCompute(xx screen_tile_size.x, xx screen_tile_size.y, 1);
+
+        glMemoryBarrier(GL_SHADER_STORAGE_BARRIER_BIT);
     }
 
     glBindVertexArray(render_state.primary_vao_id);
@@ -1300,24 +1302,30 @@ r_render_group_test_render :: (render_state: *Render_State, asset_manager: *Asse
 
 advanced_forward_rendering_test :: (render_state: *Render_State, asset_manager: *Asset_Manager)
 {
+    glClearColor(0.0, 0.0, 0.0, 1.0);
+    glClearDepth(0.0);
+    r_handle_group_buffers(render_state);
     // NOTE(Sleepster): First framebuffer, Rendering all opaque geometry. Writing Normals, Recording Depth, and writing shadow casters 
     {
+        test_shader := asset_get_shader(asset_manager, "Prepass_Data_Shader");
+        
         glBindFramebuffer(GL_FRAMEBUFFER, render_state.lighting_fbo_id);
 
-        glClearColor(0.0, 0.0, 0.0, 1.0);
-        glClearDepth(0.0);
         glClear(GL_COLOR_BUFFER_BIT|GL_DEPTH_BUFFER_BIT);
-
-        // NOTE(Sleepster): Primary Geometry Pass 
-        r_handle_group_buffers(render_state);
 
         glDepthFunc(GL_GREATER);
         glDepthMask(GL_TRUE);
+        glUseProgram(test_shader.program_id);
+
+        test_shader.update_uniform(test_shader,
+                                  "uProjectionMatrix",
+                                  *render_state.draw_frame.active_projection_matrix._11);
+        test_shader.update_uniform(test_shader,
+                                  "uViewMatrix",
+                                  *render_state.draw_frame.active_view_matrix._11);
         for group_index: 0..render_state.draw_frame.render_group_counter - 1
         {
             working_group := render_state.draw_frame.render_groups[group_index];
-            shader := working_group.bound_shader;
-            glUseProgram(shader.program_id);
 
             opaque_quad_count := working_group.current_quad_count - working_group.t_quad_count;
             glBindBuffer(GL_ARRAY_BUFFER, render_state.primary_vbo_id);
@@ -1327,7 +1335,7 @@ advanced_forward_rendering_test :: (render_state: *Render_State, asset_manager: 
                             working_group.vertex_buffer.data);
 
             glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, render_state.primary_ebo_id);
-            r_update_shader_data(working_group, shader);
+            r_update_shader_data(working_group, test_shader, false);
             if opaque_quad_count > 0
             {
                 glDrawElements(GL_TRIANGLES,
@@ -1340,19 +1348,73 @@ advanced_forward_rendering_test :: (render_state: *Render_State, asset_manager: 
 
     // NOTE(Sleepster): Compute Light Clustering 
     {
+        if render_state.draw_frame.point_light_count > 0
+        {
+            window_size           := global_window_data.current_window_size;
+            light_indices_size    := size_of(s32) * ((window_size.x / 16) * (window_size.y / 16)) * MAX_LIGHTS_PER_TILE_CLUSTER;
+            tile_light_count_size := size_of(s32) * ((window_size.x / 16) * (window_size.y / 16));
+
+            screen_tile_size := (Vector2).{xx ((window_size.x + 15) / 16), xx ((window_size.y + 15) / 16)};
+            
+            shader := render_state.lighting_cluster_compute_shader;
+            if global_window_data.current_window_size != global_window_data.old_window_size
+            {
+                shader.resize_shader_buf(shader, "LightIndicesSBO", light_indices_size);
+                shader.resize_shader_buf(shader, "TileLightCountSBO", tile_light_count_size);
+            }
+            TileSize: s32 = 16;
+            max_lights_per_cluster: s32 = MAX_LIGHTS_PER_TILE_CLUSTER;
+
+            glUseProgram(shader.program_id);
+            shader.update_uniform(shader,
+                                  "uLightCount",
+                                  *render_state.draw_frame.point_light_count);
+            shader.update_uniform(shader,
+                                  "uTileSize",
+                                  *TileSize);
+            shader.update_uniform(shader,
+                                  "uMaxLightsPerTileCluster",
+                                  *max_lights_per_cluster);
+            shader.update_uniform(shader,
+                                  "uScreenTileSize",
+                                  *screen_tile_size);
+            shader.update_buffer(shader,
+                                 "PointLightSBO",
+                                 size_of(Point_Light) * render_state.draw_frame.point_light_count,
+                                 render_state.draw_frame.point_light_buffer.data);
+
+            r_update_shader_data(null, shader);
+            glDispatchCompute(xx screen_tile_size.x, xx screen_tile_size.y, 1);
+
+            glMemoryBarrier(GL_SHADER_STORAGE_BARRIER_BIT);
+        }
     }
 
     // NOTE(Sleepster): Compute shadows, storing them in the shadow mapper 
     {
+        shadow_shader := asset_get_shader(asset_manager, "Shadow_Caster_Compute_Shader");
+        glUseProgram(shadow_shader.program_id);
+        
+        glActiveTexture(GL_TEXTURE0);
+        glBindTexture(GL_TEXTURE_2D, render_state.lighting_fbo_occlusion_map);
+
+        glBindImageTexture(0, render_state.lighting_fbo_shadow_map, 0, GL_FALSE, 0, GL_WRITE_ONLY, GL_R8);
+
+        window_size      := global_window_data.current_window_size;
+        screen_tile_size := (Vector2).{xx ((window_size.x + 15) / 16), xx ((window_size.y + 15) / 16)};
+        glDispatchCompute(xx screen_tile_size.x, xx screen_tile_size.y, 1);
+
+        glMemoryBarrier(GL_SHADER_IMAGE_ACCESS_BARRIER_BIT);
     }
 
     // NOTE(Sleepster): Blit the First Framebuffer's depth texture to the second's depth texture
     {
         glBindFramebuffer(GL_FRAMEBUFFER, render_state.forward_rendering_fbo_id);
 
-        glClearColor(0.0, 0.0, 0.0, 1.0);
-        glClearDepth(0.0);
-        glClear(GL_COLOR_BUFFER_BIT|GL_DEPTH_BUFFER_BIT);
+        // TODO(Sleepster): Investigate if we can skip blitting by simply using the same depth texture as the first buffer
+        //glBlitFramebuffer();
+
+        glClear(GL_COLOR_BUFFER_BIT);
     }
 
     // NOTE(Sleepster): Forward render. Use GL_EQUAL as the depth func, render all geometry.

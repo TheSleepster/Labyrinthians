@@ -285,7 +285,7 @@ r_create_point_light :: (render_state: *Render_State,
     point_light := *render_state.draw_frame.point_light_buffer[render_state.draw_frame.point_light_count];
     point_light.light_color = light_color;
 
-    world_to_clip := multiply(render_state.draw_frame.active_projection_matrix, render_state.draw_frame.active_view_matrix);
+    world_to_clip := multiply(render_state.draw_frame.active_view_matrix, render_state.draw_frame.active_projection_matrix);
     NDC_position  := mat4_transform(world_to_clip, v2_expand(position, 0, 1));
     if NDC_position.x < -1 || NDC_position.x > 1 ||
        NDC_position.y < -1 || NDC_position.y > 1
@@ -296,6 +296,7 @@ r_create_point_light :: (render_state: *Render_State,
 
     point_light_pos        := mat4_transform(render_state.draw_frame.active_view_matrix, v2_expand(position, 0, 1));
     point_light.vs_position = point_light_pos.xy;
+    point_light.cs_position = NDC_position.xy;
 
     point_light.spot_angle  = spot_angle;
     point_light.radius      = radius;
