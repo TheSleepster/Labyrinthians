@@ -150,6 +150,11 @@ r_create_draw_quad :: (render_state  : *Render_State,
             quad.top_right.vTexelData    = .{atlas_offset.x + sprite_size.x, atlas_offset.y};
         }
 
+        quad.top_left.vVSNormals     = .{0, 1, 0};
+        quad.bottom_left.vVSNormals  = .{0, 0, 0};
+        quad.bottom_right.vVSNormals = .{1, 0, 0};
+        quad.top_right.vVSNormals    = .{1, 1, 0};
+
         for *element: quad.elements
         {
             element.vTextureIndex  = texture_id;
@@ -210,7 +215,6 @@ r_create_draw_quad :: (render_state  : *Render_State,
     {
         element.vColor         = draw_color;
         element.vRenderOptions = render_options;
-        element.vVSNormals     = .{0, 0, 1};
     }
 
     return culled, quad;

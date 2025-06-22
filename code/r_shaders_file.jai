@@ -12,9 +12,9 @@ LIGHT_CLUSTERING_COMPUTE_SHADER :: #run -> string
     return read_entire_file("shaders/forward_light_clustering.glsl");
 };
 
-SHADOW_CASTER_COMPUTE_SHADER :: #run -> string
+SHADOW_MAP_SHADER :: #run -> string
 {
-    return read_entire_file("shaders/shadow_caster_compute.glsl");
+    return read_entire_file("shaders/shadow_map_shader.glsl");
 }
 
 PREPASS_DATA_SHADER :: #run -> string

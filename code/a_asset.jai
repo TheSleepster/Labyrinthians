@@ -88,7 +88,7 @@ am_init :: () -> Asset_Manager
     asset_add_shader_to_hash(*result, BASIC_SHADER_SOURCE_TEXT, "Basic_Shader", basic_shader_SSBO_configs, .PIXEL);
     asset_add_shader_to_hash(*result, LIGHT_CLUSTERING_COMPUTE_SHADER, "Light_Cluster_Compute", light_cluster_shader_configs, .COMPUTE);
     asset_add_shader_to_hash(*result, PREPASS_DATA_SHADER, "Prepass_Data_Shader", .[], .PIXEL);
-    asset_add_shader_to_hash(*result, SHADOW_CASTER_COMPUTE_SHADER, "Shadow_Caster_Compute_Shader", light_cluster_shader_configs, .COMPUTE);
+    asset_add_shader_to_hash(*result, SHADOW_MAP_SHADER, "Shadow_Map_Shader", basic_shader_SSBO_configs, .PIXEL);
 
     default_material: *Render_Material = c_arena_push_struct(*result.permanent_asset_arena, Render_Material);
     default_material.ambient_color  = .{1, 1, 1, 1};

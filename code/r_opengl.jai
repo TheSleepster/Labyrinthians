@@ -852,7 +852,7 @@ r_resize_framebuffers :: (render_state: *Render_State, window_size: iVector2)
         {
             depth_texture := render_state.forward_rendering_depth_texture;
             glBindTexture(GL_TEXTURE_2D, depth_texture);
-            glTexImage2D(GL_TEXTURE_2D, 0, GL_DEPTH_COMPONENT24, xx window_size.x, xx window_size.y, 0, GL_DEPTH_COMPONENT, GL_FLOAT, null);
+            glTexImage2D(GL_TEXTURE_2D, 0, GL_DEPTH24_STENCIL8, xx window_size.x, xx window_size.y, 0, GL_DEPTH_STENCIL, GL_UNSIGNED_INT_24_8, null);
             glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
             glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
         }
@@ -1019,7 +1019,7 @@ r_init_renderer_data :: (window: *SDL_Window, asset_manager: *Asset_Manager) -> 
             {
                 depth_texture := render_state.forward_rendering_depth_texture;
                 glBindTexture(GL_TEXTURE_2D, depth_texture);
-                glTexImage2D(GL_TEXTURE_2D, 0, GL_DEPTH_COMPONENT24, xx window_size.x, xx window_size.y, 0, GL_DEPTH_COMPONENT, GL_FLOAT, null);
+                glTexImage2D(GL_TEXTURE_2D, 0, GL_DEPTH24_STENCIL8, xx window_size.x, xx window_size.y, 0, GL_DEPTH_STENCIL, GL_UNSIGNED_INT_24_8, null);
                 glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
                 glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
             }
@@ -1304,14 +1304,18 @@ advanced_forward_rendering_test :: (render_state: *Render_State, asset_manager: 
 {
     glClearColor(0.0, 0.0, 0.0, 1.0);
     glClearDepth(0.0);
+    glClearStencil(0);
+    glEnable(GL_STENCIL_TEST);
+    glStencilMask(0xFF);
+    glStencilOp(GL_KEEP, GL_INCR, GL_INCR);
+    
     r_handle_group_buffers(render_state);
     // NOTE(Sleepster): First framebuffer, Rendering all opaque geometry. Writing Normals, Recording Depth, and writing shadow casters 
     {
         test_shader := asset_get_shader(asset_manager, "Prepass_Data_Shader");
         
         glBindFramebuffer(GL_FRAMEBUFFER, render_state.lighting_fbo_id);
-
-        glClear(GL_COLOR_BUFFER_BIT|GL_DEPTH_BUFFER_BIT);
+        glClear(GL_COLOR_BUFFER_BIT|GL_DEPTH_BUFFER_BIT|GL_STENCIL_BUFFER_BIT);
 
         glDepthFunc(GL_GREATER);
         glDepthMask(GL_TRUE);
@@ -1392,19 +1396,8 @@ advanced_forward_rendering_test :: (render_state: *Render_State, asset_manager: 
 
     // NOTE(Sleepster): Compute shadows, storing them in the shadow mapper 
     {
-        shadow_shader := asset_get_shader(asset_manager, "Shadow_Caster_Compute_Shader");
+        shadow_shader := asset_get_shader(asset_manager, "Shadow_Map_Shader");
         glUseProgram(shadow_shader.program_id);
-        
-        glActiveTexture(GL_TEXTURE0);
-        glBindTexture(GL_TEXTURE_2D, render_state.lighting_fbo_occlusion_map);
-
-        glBindImageTexture(0, render_state.lighting_fbo_shadow_map, 0, GL_FALSE, 0, GL_WRITE_ONLY, GL_R8);
-
-        window_size      := global_window_data.current_window_size;
-        screen_tile_size := (Vector2).{xx ((window_size.x + 15) / 16), xx ((window_size.y + 15) / 16)};
-        glDispatchCompute(xx screen_tile_size.x, xx screen_tile_size.y, 1);
-
-        glMemoryBarrier(GL_SHADER_IMAGE_ACCESS_BARRIER_BIT);
     }
 
     // NOTE(Sleepster): Blit the First Framebuffer's depth texture to the second's depth texture
