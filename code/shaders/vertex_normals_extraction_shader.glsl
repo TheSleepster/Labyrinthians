@@ -11,8 +11,8 @@ layout(location = 3) in vec2 vTexelData;
 layout(location = 4) in uint vRenderingOptions;
 layout(location = 5) in uint vTextureIndex;
 
-uniform mat4 uProjectionMatrix;
-uniform mat4 uViewMatrix;
+layout(location = 0) uniform mat4 uViewMatrix;
+layout(location = 1) uniform mat4 uProjectionMatrix;
 
 layout(location = 0)      out vec2 vOutTexelData;
 layout(location = 1)      out vec3 vOutVSNormals;
@@ -38,30 +38,21 @@ layout(location = 1)      in vec3 vOutVSNormals;
 layout(location = 2) flat in uint vOutRenderOptions;
 
 layout(location = 0) out vec4 vOutNormalColor;
-layout(location = 1) out vec4 vOutShadowCaster;
 
 void
 main()
 {
-    if((vOutRenderOptions & RO_SHADOW_CASTER) != 0)
-    {
-        vOutShadowCaster = vec4(1.0);
-    }
-    else
-    {
-        vOutShadowCaster = vec4(0.0);
-    }
-
-    vec4 DiffuseColor = vec4(0);
+    vec4 SampledNormals = vec4(0);
     if((vOutRenderOptions & RO_TEXEL_FETCHED) != 0)
     {
-        DiffuseColor = texelFetch(uNormalMap, ivec2(vOutTexelData), 0);
+        SampledNormals = texelFetch(uNormalMap, ivec2(vOutTexelData), 0);
     }
     else
     {
-        DiffuseColor = texture(uNormalMap, vOutTexelData);
+        SampledNormals = texture(uNormalMap, vOutTexelData);
     }
 
-    vOutNormalColor = DiffuseColor + vec4(vOutVSNormals, 1.0);
+    SampledNormals  = SampledNormals == vec4(0.0) ? SampledNormals : vec4(vOutVSNormals, 1.0);
+    vOutNormalColor = SampledNormals;
 }
 #endif

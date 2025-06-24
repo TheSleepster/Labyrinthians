@@ -85,9 +85,11 @@ am_init :: () -> Asset_Manager
     light_cluster_shader_configs[1] = .{"LightIndicesSBO",   size_of(s32) * (((1920/16) * (1080/16)) * MAX_LIGHTS_PER_TILE_CLUSTER), true};
     light_cluster_shader_configs[2] = .{"TileLightCountSBO", size_of(s32) * ((1920/16) * (1080/16)), true};
 
+    // TODO(Sleepster): Maybe if this gets too slow, use a compile tile hash index search.
     asset_add_shader_to_hash(*result, BASIC_SHADER_SOURCE_TEXT, "Basic_Shader", basic_shader_SSBO_configs, .PIXEL);
     asset_add_shader_to_hash(*result, LIGHT_CLUSTERING_COMPUTE_SHADER, "Light_Cluster_Compute", light_cluster_shader_configs, .COMPUTE);
-    asset_add_shader_to_hash(*result, PREPASS_DATA_SHADER, "Prepass_Data_Shader", .[], .PIXEL);
+    asset_add_shader_to_hash(*result, VERTEX_NORMALS_EXTRACTION_SHADER, "Vertex_Normals_Extraction", .[], .PIXEL);
+    asset_add_shader_to_hash(*result, OCCLUSION_RENDERER_SHADER, "Occlusion_Object_Shader", .[], .PIXEL);
     asset_add_shader_to_hash(*result, SHADOW_MAP_SHADER, "Shadow_Map_Shader", basic_shader_SSBO_configs, .PIXEL);
 
     default_material: *Render_Material = c_arena_push_struct(*result.permanent_asset_arena, Render_Material);

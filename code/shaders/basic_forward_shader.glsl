@@ -124,7 +124,7 @@ main()
             vec3 LightDir           = normalize(LightPos - SnappedFragPos);
             vec3 SpotlightDirection = normalize(vec3(Light.Direction, 0.0));
 
-            vec3 LightToFrag        = SnappedFragPos - LightPos;
+            vec3  LightToFrag       = SnappedFragPos - LightPos;
             float cosTheta          = dot(SpotlightDirection, normalize(LightToFrag));
             float cosSpotAngle      = cos(Light.SpotAngle);
             float LightDist         = length(LightPos - SnappedFragPos);

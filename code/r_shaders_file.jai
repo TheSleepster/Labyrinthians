@@ -17,7 +17,12 @@ SHADOW_MAP_SHADER :: #run -> string
     return read_entire_file("shaders/shadow_map_shader.glsl");
 }
 
-PREPASS_DATA_SHADER :: #run -> string
+VERTEX_NORMALS_EXTRACTION_SHADER :: #run -> string
 {
-    return read_entire_file("shaders/prepass_data.glsl");
+    return read_entire_file("shaders/vertex_normals_extraction_shader.glsl");
+}
+
+OCCLUSION_RENDERER_SHADER :: #run -> string
+{
+    return read_entire_file("shaders/occlusion_object_shader.glsl");
 }

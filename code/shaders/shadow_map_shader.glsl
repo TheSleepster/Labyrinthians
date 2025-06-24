@@ -18,7 +18,7 @@ layout(location = 3) in vec2 vTexelData;
 layout(location = 4) in uint vRenderingOptions;
 layout(location = 5) in uint vTextureIndex;
 
-layout(location = 0) out vec3 vOutVSNormals;
+layout(location = 0) out vec2 vOutTexCoords;
 
 void
 main()
@@ -33,7 +33,17 @@ main()
         vec2( 1,  1), // Top-right
     };
 
-    vOutVSNormals = vVSNormals;
+    vec2 TexCoords[6] = 
+        {
+            vec2(0, 1), // Top-left
+            vec2(1, 1), // Top-right
+            vec2(0, 0), // Bottom-left
+            vec2(0, 0), // Bottom-left
+            vec2(1, 0), // Bottom-right
+            vec2(1, 1), // Top-right
+        };
+
+    vOutTexCoords = TexCoords[gl_VertexID];
     gl_Position   = vec4(Vertices[gl_VertexID], 0.0, 1.0);
 }
 
@@ -45,18 +55,65 @@ layout(std430, binding = 0) buffer PointLightSBO
     point_light PointLights[];
 };
 
-layout(location = 0) in vec3 vOutVSNormals;
-layout(binding = 0) uniform sampler2D uOcclusionMap;
+uniform uint uPointLightCount;
+//uniform vec2 uScreenSize;
+
+layout(location = 0) in      vec2      vOutTexCoords;
+layout(binding  = 0) uniform sampler2D uOcclusionMap;
 
 layout(location = 0) out vec4 vShadowMask;
 
 void
 main()
 {
-    vec4 OcclusionColor = texture(uOcclusionMap, vOutVSNormals);
-    if(OcclusionColor > 0.0)
+    vec4 TotalLighting = vec4(0.0);
+    for (uint LightIndex = 0;
+         LightIndex < uPointLightCount;
+         ++LightIndex)
     {
-        vShadowMask = vec4(1.0);
+        point_light Light    = PointLights[LightIndex];
+        vec2 LightFragCoord  = Light.csPosition * 0.5 + 0.5;
+        vec2 LightToFragDist = vOutTexCoords - LightFragCoord;
+        float LightDistance  = length(LightToFragDist);
+
+        if (LightDistance < Light.Radius)
+        {
+            // NOTE(Sleepster): MarchCount controls the pixelly appearance 
+            const int MarchCount = 40;
+            bool InShadow        = false;
+
+            ivec2 OcclusionStrength = textureSize(uOcclusionMap, 0);
+            for(int StepIndex = 1;
+                StepIndex <= MarchCount;
+                ++StepIndex)
+            {
+                float Step     = float(StepIndex) / float(MarchCount);
+                vec2 SamplePos = LightFragCoord + Step * LightToFragDist;
+
+                vec2  PixelPos         = SamplePos * vec2(OcclusionStrength);
+                vec2  RoundedPixelPos  = floor(PixelPos + 0.5);
+                vec2  SnappedSamplePos = RoundedPixelPos / vec2(OcclusionStrength);
+
+                float SampleDistance   = Step * LightDistance;
+                if(SampleDistance >= Light.Radius)
+                {
+                    break;
+                }
+
+                vec4 Occlusion = texture(uOcclusionMap, SnappedSamplePos);
+                if(Occlusion.r > 0.5)
+                {
+                    InShadow = true;
+                    break; 
+                }
+            }
+
+            if(InShadow)
+            {
+                TotalLighting += vec4(0.1, 0.0, 0.0, 1.0); 
+            }
+        }
     }
+    vShadowMask = TotalLighting;
 }
 #endif

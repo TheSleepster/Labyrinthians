@@ -18,7 +18,7 @@ layout(location = 3) in vec2 vTexelData;
 layout(location = 4) in uint vRenderingOptions;
 layout(location = 5) in uint vTextureIndex;
 
-uniform mat4 uViewMatrix;
+layout(location = 0) uniform mat4 uViewMatrix;
 
 void
 main()

@@ -133,6 +133,11 @@ r_create_draw_quad :: (render_state  : *Render_State,
 
     quad.required_texture_id     = texture_id;
     quad.render_layer            = render_state.draw_frame.current_render_layer;
+
+    quad.top_left.vVSNormals     = .{0, 1, 1};
+    quad.bottom_left.vVSNormals  = .{0, 0, 1};
+    quad.bottom_right.vVSNormals = .{1, 0, 1};
+    quad.top_right.vVSNormals    = .{1, 1, 1};
     if texture_id != U32_MAX
     {
         if !(render_options & xx Rendering_Options.RO_TEXEL_FETCHED)
@@ -149,11 +154,6 @@ r_create_draw_quad :: (render_state  : *Render_State,
             quad.bottom_right.vTexelData = .{atlas_offset.x + sprite_size.x, atlas_offset.y + sprite_size.y};
             quad.top_right.vTexelData    = .{atlas_offset.x + sprite_size.x, atlas_offset.y};
         }
-
-        quad.top_left.vVSNormals     = .{0, 1, 0};
-        quad.bottom_left.vVSNormals  = .{0, 0, 0};
-        quad.bottom_right.vVSNormals = .{1, 0, 0};
-        quad.top_right.vVSNormals    = .{1, 1, 0};
 
         for *element: quad.elements
         {
@@ -230,17 +230,17 @@ r_draw_quad :: (render_state  : *Render_State,
                 rotation      :  float32           =  0.0)
 {
     assert(!(render_options & .RO_TEXEL_FETCHED));
-    current_buffer := r_get_render_group_quad_buffer(render_state);
-    culled, render_quad    := r_create_draw_quad(render_state,
-                                                 current_buffer,
-                                                 position,
-                                                 render_size,
-                                                 draw_color,
-                                                 texture_id,
-                                                 rotation,
-                                              xx render_options,
-                                                 (Vector2).{},
-                                                 (Vector2).{});
+    current_buffer      := r_get_render_group_quad_buffer(render_state);
+    culled, render_quad := r_create_draw_quad(render_state,
+                                              current_buffer,
+                                              position,
+                                              render_size,
+                                              draw_color,
+                                              texture_id,
+                                              rotation,
+                                           xx render_options,
+                                              (Vector2).{},
+                                              (Vector2).{});
     if !culled
     {
         current_buffer.quad_buffer[current_buffer.quad_count] = render_quad;
