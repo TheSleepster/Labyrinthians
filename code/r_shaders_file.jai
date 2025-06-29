@@ -26,3 +26,8 @@ OCCLUSION_RENDERER_SHADER :: #run -> string
 {
     return read_entire_file("shaders/occlusion_object_shader.glsl");
 }
+
+EX_FORWARD_SHADER :: #run -> string
+{
+    return read_entire_file("shaders/ex_forward_shader.glsl");
+}

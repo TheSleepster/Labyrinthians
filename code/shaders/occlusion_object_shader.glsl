@@ -20,6 +20,7 @@ void
 main()
 {
     vOutRenderOptions = vRenderingOptions;
+
     gl_Position       = uProjectionMatrix * uViewMatrix * vPosition;
 }
 

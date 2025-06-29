@@ -134,10 +134,10 @@ r_create_draw_quad :: (render_state  : *Render_State,
     quad.required_texture_id     = texture_id;
     quad.render_layer            = render_state.draw_frame.current_render_layer;
 
-    quad.top_left.vVSNormals     = .{0, 1, 1};
-    quad.bottom_left.vVSNormals  = .{0, 0, 1};
-    quad.bottom_right.vVSNormals = .{1, 0, 1};
-    quad.top_right.vVSNormals    = .{1, 1, 1};
+    quad.top_left.vVSNormals     = .{1, 0, 1};
+    quad.bottom_left.vVSNormals  = .{0, 1, 1};
+    quad.bottom_right.vVSNormals = .{1, 1, 1};
+    quad.top_right.vVSNormals    = .{0, 0, 1};
     if texture_id != U32_MAX
     {
         if !(render_options & xx Rendering_Options.RO_TEXEL_FETCHED)
@@ -284,10 +284,13 @@ r_create_point_light :: (render_state: *Render_State,
                          radius      :  float32,
                          strength    :  float32 = 1.0) -> *Point_Light
 {
-    assert(render_state.draw_frame.point_light_count + 1 < MAX_LIGHTS);
+    assert(render_state.draw_frame.light_count + 1 < MAX_LIGHTS);
     
-    point_light := *render_state.draw_frame.point_light_buffer[render_state.draw_frame.point_light_count];
-    point_light.light_color = light_color;
+    light_data   := *render_state.draw_frame.shader_point_light_buffer[render_state.draw_frame.light_count];
+    engine_light := *render_state.draw_frame.engine_point_light_buffer[render_state.draw_frame.light_count];
+
+    engine_light.light_data = light_data;
+    light_data.light_color  = light_color;
 
     world_to_clip := multiply(render_state.draw_frame.active_view_matrix, render_state.draw_frame.active_projection_matrix);
     NDC_position  := mat4_transform(world_to_clip, v2_expand(position, 0, 1));
@@ -298,17 +301,18 @@ r_create_point_light :: (render_state: *Render_State,
         return null;
     }
 
-    point_light_pos        := mat4_transform(render_state.draw_frame.active_view_matrix, v2_expand(position, 0, 1));
-    point_light.vs_position = point_light_pos.xy;
-    point_light.cs_position = NDC_position.xy;
+    light_data_pos        := mat4_transform(render_state.draw_frame.active_view_matrix, v2_expand(position, 0, 1));
+    light_data.vs_position = light_data_pos.xy;
+    light_data.cs_position = NDC_position.xy;
 
-    point_light.spot_angle  = spot_angle;
-    point_light.radius      = radius;
-    point_light.direction   = direction;
-    point_light.strength    = strength;
-    render_state.draw_frame.point_light_count += 1;
+    light_data.spot_angle  = spot_angle;
+    light_data.radius      = radius;
+    light_data.direction   = direction;
+    light_data.strength    = strength;
 
-    return point_light;
+    render_state.draw_frame.light_count += 1;
+
+    return engine_light;
 }
 
 r_prepare_string :: (varient: *Dynamic_Render_Font_Varient, text: string) -> s32 
@@ -371,6 +375,7 @@ r_draw_text :: (render_state: *Render_State,
                 render_pos.x += glyph.advance;
                 continue;
             }
+
             glyph.glyph_data.atlas_texture = *glyph.owner_page.texture_data;
             r_draw_sprite(render_state,
                          (Vector2).{floor(render_pos.x + glyph.offset_x), floor(render_pos.y + (glyph.ascent - xx glyph.glyph_data.atlas_size.y))},

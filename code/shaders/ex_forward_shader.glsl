@@ -106,12 +106,12 @@ main()
     vec3  FragPos      = vOutFragPos.xyz;
     vec3  AmbientLight = vec3(uAmbientLighting);
     
-    const float TileSize = 16.0;
+    const float TileSize = 3.0;
     vec3 TotalLighting = vec3(0);
     vec3 Specular      = vec3(0);
     if((vOutRenderingOptions & RO_UNLIT) == 0)
     {
-        const float EdgeDelta = 0.087;
+        const float EdgeDelta = 10;
         for(uint LightIndex = 0;
             LightIndex < uPointLightCount;
             ++LightIndex)
@@ -149,26 +149,24 @@ main()
                 SpotEffect = pow(1 - LightDist / Light.Radius, 2.5);
             }
 
-            float MaxSteps    = 500.0;
-            float CurrentStep = floor((1.0 - (LightDist / Light.Radius)) * MaxSteps) / MaxSteps;
-            float Attenuation = CurrentStep * (1.0 - (LightDist / Light.Radius));
+            float Attenuation       = SpotEffect * Light.Strength;
+            float NormalDotLightPos = max(dot(Normal, LightDir), 0.0);
 
-            float Shine            = Material.ShineStrength == 0.0 ? 128.0 : Material.ShineStrength;
-            vec3  ReflectDir       = reflect(-LightDir, Normal);
-            float SpecularLighting = pow(max(dot(Normal, ReflectDir), 0.0), Shine);
+            vec3  DiffuseLighting   = Light.Color.rgb * Attenuation;
+            vec3  ReflectDir        = reflect(-LightDir, Normal);
+            vec3  ViewDir           = normalize(-FragPos);
+            float Shine             = Material.ShineStrength == 0.0 ? 128.0 : Material.ShineStrength;
 
-            float SpotStrength = SpotEffect * Light.Strength;
-            vec3  LightContrib = (1.0 - exp(-0.5 * SpotStrength)) * Light.Color.rgb;
-            
-            vec3 EffectiveLightColor = LightContrib;
-            vec3 AdditiveLighting    = EffectiveLightColor * Attenuation;
+            float SpecularLighting  = pow(max(dot(ViewDir, ReflectDir), 0.0), Shine);
 
-            TotalLighting += EffectiveLightColor;
-            Specular      += 0.5 * SpecularLighting * Light.Color.rgb;
+            TotalLighting += DiffuseLighting; 
+            Specular      += 0.5 * SpecularLighting * Light.Color.rgb * Attenuation;
         }
 
         vec3 Color    = DiffuseColor.rgb;
-        vec3 LitColor = Color * AmbientLight + (1.0 - Color) * TotalLighting;
+        vec3 Diffuse  = DiffuseColor.rgb  * TotalLighting.rgb;
+        vec3 Ambient  = DiffuseColor.rgb  * AmbientLight;
+        vec3 LitColor = Diffuse + Ambient;
         vFragColor    = vec4(LitColor, DiffuseColor.a);
     }
     else
@@ -176,4 +174,23 @@ main()
         vFragColor = DiffuseColor;
     }
 }
+#endif
+
+#if 0
+float MaxSteps    = 5.0;
+float CurrentStep = floor((1.0 - (LightDist / Light.Radius)) * MaxSteps) / MaxSteps;
+float Attenuation = CurrentStep * (1.0 - (LightDist / Light.Radius));
+
+float Shine            = Material.ShineStrength == 0.0 ? 128.0 : Material.ShineStrength;
+vec3  ReflectDir       = reflect(-LightDir, Normal);
+float SpecularLighting = pow(max(dot(Normal, ReflectDir), 0.0), Shine);
+
+float SpotStrength = SpotEffect * Light.Strength;
+vec3  LightContrib = (1.0 - exp(-0.5 * SpotStrength)) * Light.Color.rgb;
+            
+vec3 EffectiveLightColor = LightContrib;
+vec3 AdditiveLighting    = EffectiveLightColor * Attenuation;
+
+TotalLighting += EffectiveLightColor;
+Specular      += 0.5 * SpecularLighting * Light.Color.rgb;
 #endif

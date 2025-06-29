@@ -81,7 +81,7 @@ am_init :: () -> Asset_Manager
     basic_shader_SSBO_configs[0] = .{"PointLightSBO", MAX_LIGHTS * size_of(Point_Light), false};
 
     light_cluster_shader_configs   := c_arena_push_array(*result.permanent_asset_arena, GPU_Shader_Buffer_Config, 3);
-    light_cluster_shader_configs[0] = .{"PointLightSBO",     MAX_LIGHTS * size_of(Point_Light), false};
+    light_cluster_shader_configs[0] = .{"PointLightSBO",     MAX_LIGHTS * size_of(Shader_Light_Data), false};
     light_cluster_shader_configs[1] = .{"LightIndicesSBO",   size_of(s32) * (((1920/16) * (1080/16)) * MAX_LIGHTS_PER_TILE_CLUSTER), true};
     light_cluster_shader_configs[2] = .{"TileLightCountSBO", size_of(s32) * ((1920/16) * (1080/16)), true};
 
@@ -91,6 +91,7 @@ am_init :: () -> Asset_Manager
     asset_add_shader_to_hash(*result, VERTEX_NORMALS_EXTRACTION_SHADER, "Vertex_Normals_Extraction", .[], .PIXEL);
     asset_add_shader_to_hash(*result, OCCLUSION_RENDERER_SHADER, "Occlusion_Object_Shader", .[], .PIXEL);
     asset_add_shader_to_hash(*result, SHADOW_MAP_SHADER, "Shadow_Map_Shader", basic_shader_SSBO_configs, .PIXEL);
+    asset_add_shader_to_hash(*result, EX_FORWARD_SHADER, "Ex_Forward_Shader", basic_shader_SSBO_configs, .PIXEL);
 
     default_material: *Render_Material = c_arena_push_struct(*result.permanent_asset_arena, Render_Material);
     default_material.ambient_color  = .{1, 1, 1, 1};

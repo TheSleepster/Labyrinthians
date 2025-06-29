@@ -35,7 +35,7 @@ r_default_render_material: *Render_Material;
 #no_reset ambient_factor: float32 = 0.3;
 
 // NOTE(Sleepster): VS = view space 
-Point_Light :: struct
+Shader_Light_Data :: struct
 {
     light_color: Vector4;
     vs_position: Vector2;
@@ -45,6 +45,11 @@ Point_Light :: struct
     radius     : float32;
     strength   : float32;
     padding    : [3]float32;
+};
+
+Point_Light :: struct
+{
+    light_data: *Shader_Light_Data;
 };
 
 /*
@@ -64,7 +69,7 @@ Rendering_Options :: enum u32
     RO_NONE          :: 0x00;
     RO_TEXEL_FETCHED :: 0x01;
     RO_UNLIT         :: 0x02;
-    RO_SHADOW_CASTER :: 0x10;
+    RO_OCCLUDER      :: 0x10;
 };
 
 Vertex :: struct
@@ -142,11 +147,6 @@ GPU_Shader :: struct
     hash_name        :   string;
     shader_type      :   GPU_Shader_Type;
 
-    update_buffer    : (shader: *GPU_Shader, buffer_name : string, size    : s64, data: *void);
-    resize_shader_buf: (shader: *GPU_Shader, buffer_name : string, new_size: s64);
-    update_uniform   : (shader: *GPU_Shader, uniform_name: string, data    : *void);
-    update_UBO       : (shader: *GPU_Shader, UBO_name    : string, data    : *void);
-
     uniform_data     : []GPU_Shader_Uniform;
     UBO_buffer_data  : []GPU_Shader_Buffer;
     SBO_buffer_data  : []GPU_Shader_Buffer;
@@ -166,8 +166,9 @@ Draw_Frame :: struct
 
     bound_texture_counter     :   u32; 
 
-    point_light_buffer        : []Point_Light;
-    point_light_count         :   u32;
+    shader_point_light_buffer : []Shader_Light_Data;
+    engine_point_light_buffer : []Point_Light;
+    light_count               :   u32;
 
     active_view_matrix        :   Matrix4;
     active_projection_matrix  :   Matrix4;
@@ -194,6 +195,11 @@ Render_State :: struct
 
     draw_frame_arena               : Memory_Arena;
     draw_frame                     : Draw_Frame;
+
+    update_buffer    : (shader: *GPU_Shader, buffer_name : string, size    : s64, data: *void);
+    resize_shader_buf: (shader: *GPU_Shader, buffer_name : string, new_size: s64);
+    update_uniform   : (shader: *GPU_Shader, uniform_name: string, data    : *void);
+    update_UBO       : (shader: *GPU_Shader, UBO_name    : string, data    : *void);
 
     lighting_cluster_compute_shader: *GPU_Shader;
     lightmap_shader                : *GPU_Shader;
@@ -570,10 +576,6 @@ compile_shader_source :: (arena         : *Memory_Arena,
     shader: GPU_Shader;
     shader.shader_type       = type;
     shader.shader_source     = source.*;
-    shader.update_uniform    = gl_shader_update_uniform;
-    shader.update_buffer     = gl_shader_storage_buffer_object_update_buffer;
-    shader.resize_shader_buf = gl_resize_SSBO;
-    shader.update_UBO        = gl_shader_UBO_update_buffer;
     shader.SBO_buffer_config = buffer_configs;
     if shader.shader_type ==
     {
@@ -810,19 +812,19 @@ r_init_renderer_data :: (window: *SDL_Window, asset_manager: *Asset_Manager) -> 
         SDL_GL_SetAttribute(SDL_GL_CONTEXT_MINOR_VERSION, 3);
         SDL_GL_SetAttribute(SDL_GL_DOUBLEBUFFER, 1);
         SDL_GL_SetAttribute(SDL_GL_FRAMEBUFFER_SRGB_CAPABLE, 1);
-        SDL_GL_SetAttribute(SDL_GL_DEPTH_SIZE, 24);
-        SDL_GL_SetAttribute(SDL_GL_STENCIL_SIZE, 8);
+        // SDL_GL_SetAttribute(SDL_GL_DEPTH_SIZE, 24);
+        // SDL_GL_SetAttribute(SDL_GL_STENCIL_SIZE, 8);
         
         gl_context := SDL_GL_CreateContext(window);
         SDL_GL_MakeCurrent(window, gl_context);
         gl_load(*gl, SDL_GL_GetProcAddress);
         gl_enable_debug_output();
 
-        glEnable(GL_DEPTH_TEST);
-        glDepthFunc(GL_GREATER);
+        // glEnable(GL_DEPTH_TEST);
+        // glDepthFunc(GL_GREATER);
 
-        glEnable(GL_STENCIL_TEST);
-        glStencilMask(0xFF);
+        // glEnable(GL_STENCIL_TEST);
+        // glStencilMask(0xFF);
 
         glEnable(GL_BLEND);        
         glBlendEquation(GL_FUNC_ADD);
@@ -897,6 +899,11 @@ r_init_renderer_data :: (window: *SDL_Window, asset_manager: *Asset_Manager) -> 
 
     render_state.lighting_cluster_compute_shader = asset_get_shader(asset_manager, "Light_Cluster_Compute");
     r_default_render_material                    = asset_get_render_material(asset_manager, "Default_Material");
+
+    render_state.update_buffer     = gl_shader_storage_buffer_object_update_buffer;
+    render_state.resize_shader_buf = gl_resize_SSBO;
+    render_state.update_uniform    = gl_shader_update_uniform;
+    render_state.update_UBO        = gl_shader_UBO_update_buffer;
 
     return render_state;
 }
@@ -974,7 +981,8 @@ r_update_shader_data :: (working_group: *Render_Group, shader: *GPU_Shader, upda
 DEBUG_draw_test_sprites :: (render_state: *Render_State, asset_manager: *Asset_Manager)
 {
     render_state.draw_frame.active_render_material = r_default_render_material;
-    render_state.draw_frame.point_light_buffer     = c_arena_push_array(*render_state.draw_frame_arena, Point_Light, MAX_LIGHTS);
+    render_state.draw_frame.shader_point_light_buffer = c_arena_push_array(*render_state.draw_frame_arena, Shader_Light_Data, MAX_LIGHTS);
+    render_state.draw_frame.engine_point_light_buffer = c_arena_push_array(*render_state.draw_frame_arena, Point_Light, MAX_LIGHTS);
 
     render_state.draw_frame.active_shader            = asset_get_shader(asset_manager, "Basic_Shader");
     render_state.draw_frame.active_view_matrix       = mat4_identity();
@@ -1006,10 +1014,11 @@ DEBUG_draw_test_sprites :: (render_state: *Render_State, asset_manager: *Asset_M
             }
         }
     }
+
     r_draw_sprite(render_state, .{-200,  150}, .{100, 100}, .{1, 0, 0, 1},   sprite, deg_to_rad(140));
     r_draw_quad(render_state,   .{ 200,  150}, .{100, 100}, .{0, 1, 0, 1},   texture.texID, 0);
     r_draw_quad(render_state,   .{ 200, -150}, .{100, 100}, .{0, 0, 1, 1},   texture.texID, 0);
-    r_draw_quad(render_state,   .{-200, -150}, .{100, 100}, .{1, 0, 1, 1},   texture.texID, .RO_SHADOW_CASTER, deg_to_rad(33));
+    r_draw_quad(render_state,   .{-200, -150}, .{100, 100}, .{1, 0, 1, 1},   texture.texID, .RO_OCCLUDER, deg_to_rad(33));
     r_draw_quad(render_state,   .{-200, -125}, .{ 50,  50}, .{1, 0, 0, 0.8});
     r_draw_quad(render_state,   .{-175, -125}, .{ 50,  50}, .{0, 0, 1, 0.8});
 
@@ -1027,7 +1036,6 @@ DEBUG_draw_test_sprites :: (render_state: *Render_State, asset_manager: *Asset_M
     // }
 
     light  := r_create_point_light(render_state, .{ 500, 100}, .{0.30, 0.30, 0.30, 1.0}, .{ 0, 1},  deg_to_rad(45), 500, 1.0);
-    light2 := r_create_point_light(render_state, .{ 250, 100}, .{1.0, 0.00,  0.00, 1.0}, .{1, 0}, deg_to_rad(180), 500, 2.0);
 
     default_material := asset_get_render_material(asset_manager, "Default_Material");
     
@@ -1035,25 +1043,25 @@ DEBUG_draw_test_sprites :: (render_state: *Render_State, asset_manager: *Asset_M
     // during their game update. This information is a form of
     // deferred updating, simply REGISTERING the data. At render
     // time, and no earlier, this data is sent to the GPU.
-    render_state.draw_frame.active_shader.update_uniform(render_state.draw_frame.active_shader,
-                                                        "uProjectionMatrix",
-                                                        *render_state.draw_frame.active_projection_matrix._11);
-    render_state.draw_frame.active_shader.update_uniform(render_state.draw_frame.active_shader,
-                                                       "uViewMatrix",
-                                                       *render_state.draw_frame.active_view_matrix._11);
-    render_state.draw_frame.active_shader.update_uniform(render_state.draw_frame.active_shader,
-                                                       "uPointLightCount",
-                                                       *render_state.draw_frame.point_light_count);
-    render_state.draw_frame.active_shader.update_uniform(render_state.draw_frame.active_shader,
-                                                        "uAmbientLighting",
-                                                        *ambient_factor);
-    render_state.draw_frame.active_shader.update_buffer(render_state.draw_frame.active_shader,
-                                                       "PointLightSBO",
-                                                        size_of(Point_Light) * render_state.draw_frame.point_light_count,
-                                                        render_state.draw_frame.point_light_buffer.data);
-    render_state.draw_frame.active_shader.update_UBO(render_state.draw_frame.active_shader,
-                                                    "uMaterial",
-                                                    *default_material);
+    render_state.update_uniform(render_state.draw_frame.active_shader,
+                               "uProjectionMatrix",
+                               *render_state.draw_frame.active_projection_matrix._11);
+    render_state.update_uniform(render_state.draw_frame.active_shader,
+                              "uViewMatrix",
+                              *render_state.draw_frame.active_view_matrix._11);
+    render_state.update_uniform(render_state.draw_frame.active_shader,
+                              "uPointLightCount",
+                              *render_state.draw_frame.light_count);
+    render_state.update_uniform(render_state.draw_frame.active_shader,
+                               "uAmbientLighting",
+                               *ambient_factor);
+    render_state.update_buffer(render_state.draw_frame.active_shader,
+                              "PointLightSBO",
+                               size_of(Shader_Light_Data) * render_state.draw_frame.light_count,
+                               render_state.draw_frame.shader_point_light_buffer.data);
+    render_state.update_UBO(render_state.draw_frame.active_shader,
+                           "uMaterial",
+                           *default_material);
     // for 0..100
     // {
     //     light3 := r_create_point_light(render_state, .{-250, 0}, .{0.70, 0.30,  0.30, 1.0}, .{1, 0}, deg_to_rad(180), 500, 1.0);
@@ -1063,34 +1071,25 @@ DEBUG_draw_test_sprites :: (render_state: *Render_State, asset_manager: *Asset_M
 
 DEBUG_draw_test_sprites_experimental :: (render_state: *Render_State, asset_manager: *Asset_Manager)
 {
-    render_state.draw_frame.active_render_material = r_default_render_material;
-    render_state.draw_frame.point_light_buffer     = c_arena_push_array(*render_state.draw_frame_arena, Point_Light, MAX_LIGHTS);
+    render_state.draw_frame.active_render_material    = r_default_render_material;
+    render_state.draw_frame.shader_point_light_buffer = c_arena_push_array(*render_state.draw_frame_arena, Shader_Light_Data, MAX_LIGHTS);
+    render_state.draw_frame.engine_point_light_buffer = c_arena_push_array(*render_state.draw_frame_arena, Point_Light, MAX_LIGHTS);
 
-    render_state.draw_frame.active_shader            = asset_get_shader(asset_manager, "Basic_Shader");
-    render_state.draw_frame.active_view_matrix       = mat4_identity();
-    render_state.draw_frame.active_projection_matrix = orthographic_projection_matrix(320 * -0.5,
+    render_state.draw_frame.active_shader             = asset_get_shader(asset_manager, "Ex_Forward_Shader");
+    render_state.draw_frame.active_view_matrix        = mat4_identity();
+    render_state.draw_frame.active_projection_matrix  = orthographic_projection_matrix(320 * -0.5,
                                                                                       320 *  0.5,
                                                                                       180 * -0.5,
                                                                                       180 *  0.5,
                                                                                      -1.0,
                                                                                       1.0);
-
-    // render_state.draw_frame.active_projection_matrix = orthographic_projection_matrix(global_window_data.current_window_size.x * -0.5,
-    //                                                                                   global_window_data.current_window_size.x *  0.5,
-    //                                                                                   global_window_data.current_window_size.y * -0.5,
-    //                                                                                   global_window_data.current_window_size.y *  0.5,
-    //                                                                                  -1.0,
-    //                                                                                   1.0);
-
     r_push_render_layer(render_state, 17);
-    r_draw_quad(render_state, .{-300,-160}, .{320, 180}, .{0, 0, 0, 1});
+    r_draw_quad(render_state, .{-300,-160}, .{640, 360}, .{0.1, 0.1, 0.1, 1});
     r_push_render_layer(render_state, 16);
 
 
-    r_draw_quad(render_state, .{  10,   10}, .{8, 8}, .{1, 0, 0, 1}, U32_MAX, .RO_NONE, deg_to_rad(140));
-    r_draw_quad(render_state, .{-100, -100}, .{8, 8}, .{0, 1, 0, 1});
-    r_draw_quad(render_state, .{ 100,    0}, .{8, 8}, .{0, 0, 1, 1});
-    r_draw_quad(render_state, .{ 100,  150}, .{8, 8}, .{1, 0, 1, 1});
+    r_draw_quad(render_state, .{ 60, -60}, .{8, 96},  .{1, 0, 0, 1}, U32_MAX, .RO_NONE);
+    r_draw_quad(render_state, .{-60,   0}, .{16, 16}, .{1, 0, 0, 1});
 
     sprite  := asset_get_sprite(asset_manager,  "player");
     texture := asset_get_texture(asset_manager, "player");
@@ -1105,28 +1104,8 @@ DEBUG_draw_test_sprites_experimental :: (render_state: *Render_State, asset_mana
             }
         }
     }
-    r_draw_sprite(render_state, .{16, -32}, .{5, 5}, .{1, 0, 0, 1},   sprite, deg_to_rad(0));
-    r_draw_quad(render_state,   .{8, 150}, .{8, 8}, .{0, 1, 0, 1},   texture.texID, 0);
-    r_draw_quad(render_state,   .{-20, 100}, .{8, 8}, .{0, 0, 1, 1},   texture.texID, 0);
-    r_draw_quad(render_state,   .{40, 2}, .{8, 8}, .{1, 0, 1, 1},   texture.texID, .RO_SHADOW_CASTER, deg_to_rad(33));
-    r_draw_quad(render_state,   .{20, -60}, .{16,  16}, .{1, 0, 0, 0.8});
-    r_draw_quad(render_state,   .{10, 10}, .{16,  16}, .{0, 0, 1, 0.8});
 
-    font := asset_get_font(asset_manager, "LiberationMono-Regular");
-    r_draw_text(render_state, font, "Let's go crazy with it.", .{-250, 0}, 64, .{1, 1, 1, 1});
-
-    // for 0..10000
-    // {
-    //     r_draw_quad(render_state,   .{-1750, -125}, .{ 50,  50}, .{0, 0, 1, 0.8});
-    // }
-
-    // for 0..10000
-    // {
-    //     r_draw_quad(render_state,   .{-200, -150}, .{100, 100}, .{1, 0, 1, 1},   texture.texID, .RO_NONE, deg_to_rad(33));
-    // }
-
-    // light  := r_create_point_light(render_state, .{0, -60}, .{0.30, 0.30, 0.30, 1.0}, .{ 0, 1},  deg_to_rad(45), 80, 1.0);
-    // light2 := r_create_point_light(render_state, .{0, 60}, .{1.0, 0.00,  0.00, 1.0}, .{1, 0}, deg_to_rad(180), 120, 2.0);
+    r_create_point_light(render_state, .{0, 0}, .{1.0, 1.0,  1.0, 1.0}, .{1, 1}, deg_to_rad(180), 100, 20.0);
 
     default_material := asset_get_render_material(asset_manager, "Default_Material");
     
@@ -1134,30 +1113,25 @@ DEBUG_draw_test_sprites_experimental :: (render_state: *Render_State, asset_mana
     // during their game update. This information is a form of
     // deferred updating, simply REGISTERING the data. At render
     // time, and no earlier, this data is sent to the GPU.
-    render_state.draw_frame.active_shader.update_uniform(render_state.draw_frame.active_shader,
-                                                        "uProjectionMatrix",
-                                                        *render_state.draw_frame.active_projection_matrix._11);
-    render_state.draw_frame.active_shader.update_uniform(render_state.draw_frame.active_shader,
-                                                       "uViewMatrix",
-                                                       *render_state.draw_frame.active_view_matrix._11);
-    render_state.draw_frame.active_shader.update_uniform(render_state.draw_frame.active_shader,
-                                                       "uPointLightCount",
-                                                       *render_state.draw_frame.point_light_count);
-    render_state.draw_frame.active_shader.update_uniform(render_state.draw_frame.active_shader,
-                                                        "uAmbientLighting",
-                                                        *ambient_factor);
-    render_state.draw_frame.active_shader.update_buffer(render_state.draw_frame.active_shader,
-                                                       "PointLightSBO",
-                                                        size_of(Point_Light) * render_state.draw_frame.point_light_count,
-                                                        render_state.draw_frame.point_light_buffer.data);
-    render_state.draw_frame.active_shader.update_UBO(render_state.draw_frame.active_shader,
-                                                    "uMaterial",
-                                                    *default_material);
-    // for 0..100
-    // {
-    //     light3 := r_create_point_light(render_state, .{-250, 0}, .{0.70, 0.30,  0.30, 1.0}, .{1, 0}, deg_to_rad(180), 500, 1.0);
-    // }
-    
+    render_state.update_uniform(render_state.draw_frame.active_shader,
+                               "uProjectionMatrix",
+                               *render_state.draw_frame.active_projection_matrix._11);
+    render_state.update_uniform(render_state.draw_frame.active_shader,
+                               "uViewMatrix",
+                               *render_state.draw_frame.active_view_matrix._11);
+    render_state.update_uniform(render_state.draw_frame.active_shader,
+                               "uPointLightCount",
+                               *render_state.draw_frame.light_count);
+    render_state.update_uniform(render_state.draw_frame.active_shader,
+                               "uAmbientLighting",
+                               *ambient_factor);
+    render_state.update_buffer(render_state.draw_frame.active_shader,
+                              "PointLightSBO",
+                               size_of(Shader_Light_Data) * render_state.draw_frame.light_count,
+                               render_state.draw_frame.shader_point_light_buffer.data);
+    render_state.update_UBO(render_state.draw_frame.active_shader,
+                           "uMaterial",
+                           *default_material);
 }
 
 r_render_group_test_render :: (render_state: *Render_State, asset_manager: *Asset_Manager)
@@ -1168,7 +1142,7 @@ r_render_group_test_render :: (render_state: *Render_State, asset_manager: *Asse
     glClear(GL_COLOR_BUFFER_BIT|GL_DEPTH_BUFFER_BIT);
 
     // NOTE(Sleepster): Clustered Lighting Compute Shader 
-    if render_state.draw_frame.point_light_count > 0
+    if render_state.draw_frame.light_count > 0
     {
         window_size           := global_window_data.current_window_size;
         light_indices_size    := size_of(s32) * ((window_size.x / 16) * (window_size.y / 16)) * MAX_LIGHTS_PER_TILE_CLUSTER;
@@ -1179,29 +1153,29 @@ r_render_group_test_render :: (render_state: *Render_State, asset_manager: *Asse
         shader := render_state.lighting_cluster_compute_shader;
         if global_window_data.current_window_size != global_window_data.old_window_size
         {
-            shader.resize_shader_buf(shader, "LightIndicesSBO", light_indices_size);
-            shader.resize_shader_buf(shader, "TileLightCountSBO", tile_light_count_size);
+            render_state.resize_shader_buf(shader, "LightIndicesSBO", light_indices_size);
+            render_state.resize_shader_buf(shader, "TileLightCountSBO", tile_light_count_size);
         }
         TileSize: s32 = 16;
         max_lights_per_cluster: s32 = MAX_LIGHTS_PER_TILE_CLUSTER;
 
         glUseProgram(shader.program_id);
-        shader.update_uniform(shader,
-                             "uLightCount",
-                             *render_state.draw_frame.point_light_count);
-        shader.update_uniform(shader,
-                             "uTileSize",
-                             *TileSize);
-        shader.update_uniform(shader,
-                             "uMaxLightsPerTileCluster",
-                             *max_lights_per_cluster);
-        shader.update_uniform(shader,
-                             "uScreenTileSize",
-                             *screen_tile_size);
-        shader.update_buffer(shader,
-                             "PointLightSBO",
-                             size_of(Point_Light) * render_state.draw_frame.point_light_count,
-                             render_state.draw_frame.point_light_buffer.data);
+        render_state.update_uniform(shader,
+                                   "uLightCount",
+                                   *render_state.draw_frame.light_count);
+        render_state.update_uniform(shader,
+                                   "uTileSize",
+                                   *TileSize);
+        render_state.update_uniform(shader,
+                                   "uMaxLightsPerTileCluster",
+                                   *max_lights_per_cluster);
+        render_state.update_uniform(shader,
+                                   "uScreenTileSize",
+                                   *screen_tile_size);
+        render_state.update_buffer(shader,
+                                   "PointLightSBO",
+                                   size_of(Shader_Light_Data) * render_state.draw_frame.light_count,
+                                   render_state.draw_frame.shader_point_light_buffer.data);
 
         r_update_shader_data(null, shader);
         glDispatchCompute(xx screen_tile_size.x, xx screen_tile_size.y, 1);
@@ -1252,6 +1226,8 @@ r_render_group_test_render :: (render_state: *Render_State, asset_manager: *Asse
 #no_reset experimental_init: bool = false;
 r_experimental_rendering :: (render_state: *Render_State, asset_manager: *Asset_Manager)
 {
+    render_engine_width : u32 = 320;
+    render_engine_height: u32 = 180;
     if !experimental_init
     {
         glGenFramebuffers(1, *render_state.ex_framebuffer_ID);
@@ -1264,7 +1240,7 @@ r_experimental_rendering :: (render_state: *Render_State, asset_manager: *Asset_
         glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
         glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
 
-        glTexImage2D(GL_TEXTURE_2D, 0, GL_SRGB_ALPHA, 320, 180, 0, GL_RGBA, GL_UNSIGNED_BYTE, null);
+        glTexImage2D(GL_TEXTURE_2D, 0, GL_SRGB_ALPHA, render_engine_width, render_engine_height, 0, GL_RGBA, GL_UNSIGNED_BYTE, null);
         
         glBindFramebuffer(GL_FRAMEBUFFER, render_state.ex_framebuffer_ID);
         glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, render_state.ex_color_attachment0, 0);
@@ -1281,12 +1257,13 @@ r_experimental_rendering :: (render_state: *Render_State, asset_manager: *Asset_
     glBindFramebuffer(GL_FRAMEBUFFER, render_state.ex_framebuffer_ID);
     glDisable(GL_DEPTH_TEST);
 
-    glViewport(0, 0, 320, 180);
+    glViewport(0, 0, render_engine_width, render_engine_height);
     glClearColor(0.0, 0.0, 0.0, 1.0);
     glClear(GL_COLOR_BUFFER_BIT);
 
     // NOTE(Sleepster): Primary Geometry Pass 
     r_handle_group_buffers(render_state);
+    r_handle_lighting_data(render_state);
     for group_index: 0..render_state.draw_frame.render_group_counter - 1
     {
         working_group := render_state.draw_frame.render_groups[group_index];
@@ -1317,12 +1294,17 @@ r_experimental_rendering :: (render_state: *Render_State, asset_manager: *Asset_
                            cast(*void)((opaque_quad_count * 6) * size_of(u32)));
         }
     }
+
+    client_size := global_window_data.current_window_size;
+    glBindFramebuffer(GL_READ_FRAMEBUFFER, render_state.ex_framebuffer_ID);
+    glBindFramebuffer(GL_DRAW_FRAMEBUFFER, 0);
+    glBlitFramebuffer(0, 0, 320, 180, 0, 0, client_size.x, client_size.y, GL_COLOR_BUFFER_BIT, GL_NEAREST);
 }
 
 r_reset_draw_frame :: (render_state: *Render_State)
 {
     c_arena_reset(*render_state.draw_frame_arena);
-    render_state.draw_frame.point_light_count    = 0;
+    render_state.draw_frame.light_count          = 0;
     render_state.draw_frame.current_render_layer = 32;
     render_state.draw_frame                      = .{};
 
