@@ -26,3 +26,13 @@ EX_FORWARD_SHADER :: #run -> string
 {
     return read_entire_file("shaders/ex_forward_shader.glsl");
 }
+
+EX_LIGHTING_PASS_SHADER :: #run -> string
+{
+    return read_entire_file("shaders/ex_lighting_pass.glsl");
+}
+
+EX_OCCLUSION_SHADER :: #run -> string
+{
+    return read_entire_file("shaders/ex_shadow_geometry_render.glsl");
+}

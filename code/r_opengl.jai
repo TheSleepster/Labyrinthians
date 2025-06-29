@@ -210,8 +210,8 @@ Render_State :: struct
     ex_framebuffer_ID    : u32;
     ex_color_attachment0 : u32;
 
-    light_rendering_shader: u32;
-    shadow_caster_shader  : u32;
+    light_rendering_shader: *GPU_Shader;
+    shadow_caster_shader  : *GPU_Shader;
 };
 
 // TODO(Sleepster): speed... 
@@ -904,6 +904,9 @@ r_init_renderer_data :: (window: *SDL_Window, asset_manager: *Asset_Manager) -> 
     render_state.lighting_cluster_compute_shader = asset_get_shader(asset_manager, "Light_Cluster_Compute");
     r_default_render_material                    = asset_get_render_material(asset_manager, "Default_Material");
 
+    render_state.light_rendering_shader = asset_get_shader(asset_manager, "Ex_Lighting_Shader");
+    render_state.shadow_caster_shader   = asset_get_shader(asset_manager, "Ex_Occlusion_Shader");
+
     render_state.update_buffer     = gl_shader_storage_buffer_object_update_buffer;
     render_state.resize_shader_buf = gl_resize_SSBO;
     render_state.update_uniform    = gl_shader_update_uniform;
@@ -1289,6 +1292,7 @@ r_experimental_rendering :: (render_state: *Render_State, asset_manager: *Asset_
     glClear(GL_COLOR_BUFFER_BIT);
     glBindVertexArray(render_state.primary_vao_id);
 
+    // TODO(Sleepster): Four lights at a time? 
     active_viewport_x_offset: s32;
     active_viewport_y_offset: s32;
     max_light_radius        : Vector2 = .{256, 256};
@@ -1300,7 +1304,7 @@ r_experimental_rendering :: (render_state: *Render_State, asset_manager: *Asset_
             occluder_count: u32;
             
             current_light := *render_state.draw_frame.engine_point_light_buffer[light_index];
-            if current_light != null
+            if current_light.light_data != null
             {
                 working_quad_buffer := *render_state.draw_frame.quad_buffers;
                 while working_quad_buffer
@@ -1325,7 +1329,7 @@ r_experimental_rendering :: (render_state: *Render_State, asset_manager: *Asset_
                                     end_dir_norm    := normalize(direction_end);
 
                                     projected_start := current_light.ws_position + (start_dir_norm * current_light.light_data.radius);
-                                    projected_end   := current_light.ws_position + (end_dir_norm   * current_light.light_data.radius);
+                                    projected_end   := current_light.ws_position + (end_dir_norm   * (current_light.light_data.radius * 1.20));
 
                                     new_quad: Render_Quad;
 
@@ -1343,18 +1347,83 @@ r_experimental_rendering :: (render_state: *Render_State, asset_manager: *Asset_
                     
                     working_quad_buffer = working_quad_buffer.next_buffer;
                 }
-                glViewport(active_viewport_x_offset,
-                           active_viewport_y_offset,
-                           cast(u32)max_light_radius.x,
-                           cast(u32)max_light_radius.y);
 
-                lighting_color_attachments: []GLenum = .[GL_COLOR_ATTACHMENT1];
-                glDrawBuffers(1, lighting_color_attachments.data);
-                glUseProgram(render_state.light_rendering_shader);
-                glDrawArrays(GL_TRIANGLES, 0, 6);
+                occluder_vertex_buffer: []Vertex = c_arena_push_array(*render_state.draw_frame_arena, Vertex, xx (occluder_count * 4));
+                occluder_vertex_count : u32;
 
-                glUseProgram(render_state.shadow_caster_shader);
-                glDrawElements(GL_TRIANGLES, occluder_count * 6, GL_UNSIGNED_INT, null);
+                for occluder_index: 0..occluder_count - 1
+                {
+                    quad := occluders[occluder_index];
+
+                    occluder_vertex_buffer[occluder_vertex_count]     = quad.top_left;
+                    occluder_vertex_buffer[occluder_vertex_count + 1] = quad.top_right;
+                    occluder_vertex_buffer[occluder_vertex_count + 2] = quad.bottom_left;
+                    occluder_vertex_buffer[occluder_vertex_count + 3] = quad.bottom_right;
+
+                    occluder_vertex_count += 4;
+                }
+
+                // glViewport(active_viewport_x_offset,
+                //            active_viewport_y_offset,
+                //            cast(u32)max_light_radius.x,
+                //            cast(u32)max_light_radius.y);
+
+                // NOTE(Sleepster): Render the light 
+                {
+                    lighting_color_attachments: []GLenum = .[GL_COLOR_ATTACHMENT1];
+                    glDrawBuffers(1, lighting_color_attachments.data);
+
+                    glEnable(GL_BLEND);
+                    glBlendEquation(GL_FUNC_ADD);
+                    glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+                    glColorMask(GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE);  
+
+
+                    assert(render_state.light_rendering_shader != null);
+                    glUseProgram(render_state.light_rendering_shader.program_id);
+
+                    render_state.update_UBO(render_state.light_rendering_shader,
+                                            "uPointLight",
+                                             current_light.light_data);
+
+                    render_state.update_uniform(render_state.light_rendering_shader,
+                                                "uProjectionMatrix",
+                                                *render_state.draw_frame.active_projection_matrix._11);
+                    
+                    r_update_shader_data(null, render_state.light_rendering_shader);
+                    glDrawArrays(GL_TRIANGLES, 0, 6);
+                }
+
+                // NOTE(Sleepster): Render the shadow quads 
+                {
+                    assert(render_state.shadow_caster_shader != null);
+                    glUseProgram(render_state.shadow_caster_shader.program_id);
+
+                    glBindBuffer(GL_ARRAY_BUFFER, render_state.primary_vbo_id);
+                    glBufferSubData(GL_ARRAY_BUFFER,
+                                    0,
+                                    ((occluder_count * 4) * size_of(Vertex)),
+                                    occluder_vertex_buffer.data);
+
+                    render_state.update_uniform(render_state.shadow_caster_shader,
+                                                "uViewMatrix",
+                                                *render_state.draw_frame.active_view_matrix._11);
+
+                    render_state.update_uniform(render_state.shadow_caster_shader,
+                                                "uProjectionMatrix",
+                                                *render_state.draw_frame.active_projection_matrix._11);
+
+                    r_update_shader_data(null, render_state.shadow_caster_shader);
+
+                    glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, render_state.primary_ebo_id);
+                    glDrawElements(GL_TRIANGLES, occluder_count * 6, GL_UNSIGNED_INT, null);
+                    active_viewport_x_offset += 256;
+                    if active_viewport_x_offset < 8096
+                    {
+                        active_viewport_y_offset += 256;
+                        active_viewport_x_offset  = 0;
+                    }
+                }
             }
         }
     }
@@ -1365,6 +1434,11 @@ r_experimental_rendering :: (render_state: *Render_State, asset_manager: *Asset_
     glViewport(0, 0, render_engine_width, render_engine_height);
     glClearColor(0.0, 0.0, 0.0, 1.0);
     glClear(GL_COLOR_BUFFER_BIT);
+
+    glEnable(GL_BLEND);        
+    glBlendEquation(GL_FUNC_ADD);
+    glBlendFunc(GL_ONE, GL_ONE_MINUS_SRC_COLOR);
+
 
     // NOTE(Sleepster): Primary Geometry Pass 
     r_handle_group_buffers(render_state);
@@ -1404,6 +1478,10 @@ r_experimental_rendering :: (render_state: *Render_State, asset_manager: *Asset_
     glBindFramebuffer(GL_READ_FRAMEBUFFER, render_state.ex_framebuffer_ID);
     glBindFramebuffer(GL_DRAW_FRAMEBUFFER, 0);
     glBlitFramebuffer(0, 0, 320, 180, 0, 0, client_size.x, client_size.y, GL_COLOR_BUFFER_BIT, GL_NEAREST);
+
+    // NOTE(Sleepster): Final blend 
+    {
+    }
 }
 
 r_reset_draw_frame :: (render_state: *Render_State)

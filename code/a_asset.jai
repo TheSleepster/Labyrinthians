@@ -91,6 +91,8 @@ am_init :: () -> Asset_Manager
     asset_add_shader_to_hash(*result, VERTEX_NORMALS_EXTRACTION_SHADER, "Vertex_Normals_Extraction", .[], .PIXEL);
     asset_add_shader_to_hash(*result, SHADOW_MAP_SHADER, "Shadow_Map_Shader", basic_shader_SSBO_configs, .PIXEL);
     asset_add_shader_to_hash(*result, EX_FORWARD_SHADER, "Ex_Forward_Shader", basic_shader_SSBO_configs, .PIXEL);
+    asset_add_shader_to_hash(*result, EX_LIGHTING_PASS_SHADER, "Ex_Lighting_Shader", .[], .PIXEL);
+    asset_add_shader_to_hash(*result, EX_OCCLUSION_SHADER, "Ex_Occlusion_Shader", .[], .PIXEL);
 
     default_material: *Render_Material = c_arena_push_struct(*result.permanent_asset_arena, Render_Material);
     default_material.ambient_color  = .{1, 1, 1, 1};
