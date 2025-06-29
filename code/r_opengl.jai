@@ -49,7 +49,8 @@ Shader_Light_Data :: struct
 
 Point_Light :: struct
 {
-    light_data: *Shader_Light_Data;
+    light_data : *Shader_Light_Data;
+    ws_position:  Vector2;
 };
 
 /*
@@ -208,6 +209,9 @@ Render_State :: struct
     //EXPERIMENTAL
     ex_framebuffer_ID    : u32;
     ex_color_attachment0 : u32;
+
+    light_rendering_shader: u32;
+    shadow_caster_shader  : u32;
 };
 
 // TODO(Sleepster): speed... 
@@ -1134,6 +1138,21 @@ DEBUG_draw_test_sprites_experimental :: (render_state: *Render_State, asset_mana
                            *default_material);
 }
 
+is_quad_within_light_radius :: inline (light: *Point_Light, working_quad: *Render_Quad) -> bool
+{
+    result: bool;
+
+    result = (square(working_quad.center_pos.x - light.ws_position.x) +
+              square(working_quad.center_pos.y - light.ws_position.y)) <= square(light.light_data.radius);
+
+    return result;
+}
+
+calculate_shadow_geometry :: (light: *Point_Light, quad: *Render_Quad) -> Render_Quad
+{
+    return .{};
+}
+
 r_render_group_test_render :: (render_state: *Render_State, asset_manager: *Asset_Manager)
 {
     glViewport(0, 0, xx global_window_data.current_window_size.x, xx global_window_data.current_window_size.y);
@@ -1228,12 +1247,25 @@ r_experimental_rendering :: (render_state: *Render_State, asset_manager: *Asset_
 {
     render_engine_width : u32 = 320;
     render_engine_height: u32 = 180;
+
+    lighting_texture: u32;
     if !experimental_init
     {
         glGenFramebuffers(1, *render_state.ex_framebuffer_ID);
         glGenTextures(1, *render_state.ex_color_attachment0);
+        glGenTextures(1, *lighting_texture);
+
 
         glBindTexture(GL_TEXTURE_2D, render_state.ex_color_attachment0);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
+
+        glTexImage2D(GL_TEXTURE_2D, 0, GL_SRGB_ALPHA, render_engine_width, render_engine_height, 0, GL_RGBA, GL_UNSIGNED_BYTE, null);
+
+        glBindTexture(GL_TEXTURE_2D, lighting_texture);
         glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
         glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
 
@@ -1244,8 +1276,9 @@ r_experimental_rendering :: (render_state: *Render_State, asset_manager: *Asset_
         
         glBindFramebuffer(GL_FRAMEBUFFER, render_state.ex_framebuffer_ID);
         glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, render_state.ex_color_attachment0, 0);
+        glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT1, GL_TEXTURE_2D, lighting_texture, 0);
 
-        color_attachments: []GLenum = .[GL_COLOR_ATTACHMENT0];
+        color_attachments: []GLenum = .[GL_COLOR_ATTACHMENT1];
         glDrawBuffers(xx color_attachments.count, color_attachments.data);
 
         glBindTexture(GL_TEXTURE_2D, 0);
@@ -1256,6 +1289,62 @@ r_experimental_rendering :: (render_state: *Render_State, asset_manager: *Asset_
 
     glBindFramebuffer(GL_FRAMEBUFFER, render_state.ex_framebuffer_ID);
     glDisable(GL_DEPTH_TEST);
+
+    glClearColor(0.0, 0.0, 0.0, 1.0);
+    glClear(GL_COLOR_BUFFER_BIT);
+    glBindVertexArray(render_state.primary_vao_id);
+
+    active_viewport_x_offset: s32;
+    active_viewport_y_offset: s32;
+    max_light_radius        : Vector2 = .{256, 256};
+    if render_state.draw_frame.light_count < 0
+    {
+        for light_index: 0..render_state.draw_frame.light_count
+        {
+            occluders     : [100]Render_Quad;
+            occluder_count: u32;
+            
+            current_light := *render_state.draw_frame.engine_point_light_buffer[light_index];
+            if current_light != null
+            {
+                working_quad_buffer := *render_state.draw_frame.quad_buffers;
+                while working_quad_buffer
+                {
+                    for quad_index: 0..(working_quad_buffer.quad_count + working_quad_buffer.t_quad_count) - 1
+                    {
+                        working_quad := *working_quad_buffer.quad_buffer[quad_index];
+                        if working_quad.render_options & .RO_OCCLUDER
+                        {
+                            if is_quad_within_light_radius(current_light, working_quad)
+                            {
+                                assert(occluder_count + 1 < occluders.count);
+
+                                occluders[occluder_count] = calculate_shadow_geometry(current_light, working_quad);
+                                occluder_count += 1;
+                            }
+                        }
+                    }
+                    
+                    working_quad_buffer = working_quad_buffer.next_buffer;
+                }
+                glViewport(active_viewport_x_offset,
+                           active_viewport_y_offset,
+                           cast(u32)max_light_radius.x,
+                           cast(u32)max_light_radius.y);
+
+                lighting_color_attachments: []GLenum = .[GL_COLOR_ATTACHMENT1];
+                glDrawBuffers(1, lighting_color_attachments.data);
+                glUseProgram(render_state.light_rendering_shader);
+                glDrawArrays(GL_TRIANGLES, 0, 6);
+
+                glUseProgram(render_state.shadow_caster_shader);
+                glDrawElements(GL_TRIANGLES, occluder_count * 6, GL_UNSIGNED_INT, null);
+            }
+        }
+    }
+
+    lighting_color_attachments: []GLenum = .[GL_COLOR_ATTACHMENT0];
+    glDrawBuffers(1, lighting_color_attachments.data);
 
     glViewport(0, 0, render_engine_width, render_engine_height);
     glClearColor(0.0, 0.0, 0.0, 1.0);

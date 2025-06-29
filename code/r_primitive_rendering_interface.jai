@@ -3,6 +3,8 @@ Render_Primitive_Data :: struct
 {
     world_position          : Vector2;
     render_size             : Vector2;
+    center_pos              : Vector2;
+    
     render_color            : Vector4;
     rotation                : float32;
     is_transparent          : s32;
@@ -13,6 +15,8 @@ Render_Primitive_Data :: struct
     render_layer            : u32;
     required_texture_id     : u32;
     render_texture_idx      : u32;
+
+    render_options          : Rendering_Options;
 
     required_shader         : *GPU_Shader;
     required_render_material: *Render_Material;
@@ -81,6 +85,9 @@ r_create_draw_quad :: (render_state  : *Render_State,
     quad.render_size    = render_size;
     quad.render_color   = draw_color;
     quad.rotation       = rotation;
+    quad.render_options = xx render_options;
+
+    quad.center_pos = quad.world_position + (quad.render_size * 0.5);
 
     top    := position.y;
     bottom := position.y + render_size.y;
@@ -302,13 +309,14 @@ r_create_point_light :: (render_state: *Render_State,
     }
 
     light_data_pos        := mat4_transform(render_state.draw_frame.active_view_matrix, v2_expand(position, 0, 1));
-    light_data.vs_position = light_data_pos.xy;
-    light_data.cs_position = NDC_position.xy;
+    engine_light.ws_position = position;
+    light_data.vs_position   = light_data_pos.xy;
+    light_data.cs_position   = NDC_position.xy;
 
-    light_data.spot_angle  = spot_angle;
-    light_data.radius      = radius;
-    light_data.direction   = direction;
-    light_data.strength    = strength;
+    light_data.spot_angle    = spot_angle;
+    light_data.radius        = radius;
+    light_data.direction     = direction;
+    light_data.strength      = strength;
 
     render_state.draw_frame.light_count += 1;
 

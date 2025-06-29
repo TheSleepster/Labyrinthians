@@ -89,7 +89,6 @@ am_init :: () -> Asset_Manager
     asset_add_shader_to_hash(*result, BASIC_SHADER_SOURCE_TEXT, "Basic_Shader", basic_shader_SSBO_configs, .PIXEL);
     asset_add_shader_to_hash(*result, LIGHT_CLUSTERING_COMPUTE_SHADER, "Light_Cluster_Compute", light_cluster_shader_configs, .COMPUTE);
     asset_add_shader_to_hash(*result, VERTEX_NORMALS_EXTRACTION_SHADER, "Vertex_Normals_Extraction", .[], .PIXEL);
-    asset_add_shader_to_hash(*result, OCCLUSION_RENDERER_SHADER, "Occlusion_Object_Shader", .[], .PIXEL);
     asset_add_shader_to_hash(*result, SHADOW_MAP_SHADER, "Shadow_Map_Shader", basic_shader_SSBO_configs, .PIXEL);
     asset_add_shader_to_hash(*result, EX_FORWARD_SHADER, "Ex_Forward_Shader", basic_shader_SSBO_configs, .PIXEL);
 

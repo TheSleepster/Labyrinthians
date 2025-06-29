@@ -22,11 +22,6 @@ VERTEX_NORMALS_EXTRACTION_SHADER :: #run -> string
     return read_entire_file("shaders/vertex_normals_extraction_shader.glsl");
 }
 
-OCCLUSION_RENDERER_SHADER :: #run -> string
-{
-    return read_entire_file("shaders/occlusion_object_shader.glsl");
-}
-
 EX_FORWARD_SHADER :: #run -> string
 {
     return read_entire_file("shaders/ex_forward_shader.glsl");
