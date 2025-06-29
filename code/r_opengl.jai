@@ -1092,8 +1092,8 @@ DEBUG_draw_test_sprites_experimental :: (render_state: *Render_State, asset_mana
     r_push_render_layer(render_state, 16);
 
 
-    r_draw_quad(render_state, .{ 60, -60}, .{8, 96},  .{1, 0, 0, 1}, U32_MAX, .RO_NONE);
-    r_draw_quad(render_state, .{-60,   0}, .{16, 16}, .{1, 0, 0, 1});
+    r_draw_quad(render_state, .{ 60, -60}, .{8, 96},  .{1, 0, 0, 1}, U32_MAX, .RO_OCCLUDER);
+    r_draw_quad(render_state, .{-60,   0}, .{16, 16}, .{1, 0, 0, 1}, U32_MAX, .RO_OCCLUDER);
 
     sprite  := asset_get_sprite(asset_manager,  "player");
     texture := asset_get_texture(asset_manager, "player");
@@ -1146,11 +1146,6 @@ is_quad_within_light_radius :: inline (light: *Point_Light, working_quad: *Rende
               square(working_quad.center_pos.y - light.ws_position.y)) <= square(light.light_data.radius);
 
     return result;
-}
-
-calculate_shadow_geometry :: (light: *Point_Light, quad: *Render_Quad) -> Render_Quad
-{
-    return .{};
 }
 
 r_render_group_test_render :: (render_state: *Render_State, asset_manager: *Asset_Manager)
@@ -1297,7 +1292,7 @@ r_experimental_rendering :: (render_state: *Render_State, asset_manager: *Asset_
     active_viewport_x_offset: s32;
     active_viewport_y_offset: s32;
     max_light_radius        : Vector2 = .{256, 256};
-    if render_state.draw_frame.light_count < 0
+    if render_state.draw_frame.light_count > 0
     {
         for light_index: 0..render_state.draw_frame.light_count
         {
@@ -1313,14 +1308,35 @@ r_experimental_rendering :: (render_state: *Render_State, asset_manager: *Asset_
                     for quad_index: 0..(working_quad_buffer.quad_count + working_quad_buffer.t_quad_count) - 1
                     {
                         working_quad := *working_quad_buffer.quad_buffer[quad_index];
+                        assert(working_quad != null);
                         if working_quad.render_options & .RO_OCCLUDER
                         {
                             if is_quad_within_light_radius(current_light, working_quad)
                             {
-                                assert(occluder_count + 1 < occluders.count);
+                                for vertex_index: 0..4 - 1
+                                {
+                                    edge_start := working_quad.elements[vertex_index].vPosition.xy;
+                                    edge_end   := working_quad.elements[(vertex_index + 1) % 4].vPosition.xy;
 
-                                occluders[occluder_count] = calculate_shadow_geometry(current_light, working_quad);
-                                occluder_count += 1;
+                                    direction_start := edge_start - current_light.ws_position;
+                                    direction_end   := edge_end   - current_light.ws_position;
+
+                                    start_dir_norm  := normalize(direction_start);
+                                    end_dir_norm    := normalize(direction_end);
+
+                                    projected_start := current_light.ws_position + (start_dir_norm * current_light.light_data.radius);
+                                    projected_end   := current_light.ws_position + (end_dir_norm   * current_light.light_data.radius);
+
+                                    new_quad: Render_Quad;
+
+                                    new_quad.top_left.vPosition     = v2_expand(edge_start, 0, 1);
+                                    new_quad.top_right.vPosition    = v2_expand(edge_end, 0, 1);
+                                    new_quad.bottom_left.vPosition  = v2_expand(projected_end, 0, 1);
+                                    new_quad.bottom_right.vPosition = v2_expand(projected_start, 0, 1);
+
+                                    occluders[occluder_count] = new_quad;
+                                    occluder_count += 1;
+                                }
                             }
                         }
                     }
