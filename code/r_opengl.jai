@@ -1298,11 +1298,14 @@ r_experimental_rendering :: (render_state: *Render_State, asset_manager: *Asset_
     max_light_radius        : Vector2 = .{256, 256};
     if render_state.draw_frame.light_count > 0
     {
+        occluders     : [100]Render_Quad;
+        occluder_count: u32;
+            
         for light_index: 0..render_state.draw_frame.light_count
         {
-            occluders     : [100]Render_Quad;
-            occluder_count: u32;
-            
+            shadows       : [100]Render_Quad;
+            shadow_counter: u32;
+
             current_light := *render_state.draw_frame.engine_point_light_buffer[light_index];
             if current_light.light_data != null
             {
@@ -1317,6 +1320,9 @@ r_experimental_rendering :: (render_state: *Render_State, asset_manager: *Asset_
                         {
                             if is_quad_within_light_radius(current_light, working_quad)
                             {
+                                occluders[occluder_count] = working_quad.*;
+                                occluder_count += 1;
+                                
                                 for vertex_index: 0..4 - 1
                                 {
                                     edge_start := working_quad.elements[vertex_index].vPosition.xy;
@@ -1338,8 +1344,8 @@ r_experimental_rendering :: (render_state: *Render_State, asset_manager: *Asset_
                                     new_quad.bottom_left.vPosition  = v2_expand(projected_end, 0, 1);
                                     new_quad.bottom_right.vPosition = v2_expand(projected_start, 0, 1);
 
-                                    occluders[occluder_count] = new_quad;
-                                    occluder_count += 1;
+                                    shadows[shadow_counter] = new_quad;
+                                    shadow_counter += 1;
                                 }
                             }
                         }
@@ -1348,19 +1354,19 @@ r_experimental_rendering :: (render_state: *Render_State, asset_manager: *Asset_
                     working_quad_buffer = working_quad_buffer.next_buffer;
                 }
 
-                occluder_vertex_buffer: []Vertex = c_arena_push_array(*render_state.draw_frame_arena, Vertex, xx (occluder_count * 4));
-                occluder_vertex_count : u32;
+                shadow_vertex_buffer: []Vertex = c_arena_push_array(*render_state.draw_frame_arena, Vertex, xx (shadow_counter * 4));
+                shadow_vertex_count : u32;
 
-                for occluder_index: 0..occluder_count - 1
+                for shadow_index: 0..shadow_counter - 1
                 {
-                    quad := occluders[occluder_index];
+                    quad := shadows[shadow_index];
 
-                    occluder_vertex_buffer[occluder_vertex_count]     = quad.top_left;
-                    occluder_vertex_buffer[occluder_vertex_count + 1] = quad.top_right;
-                    occluder_vertex_buffer[occluder_vertex_count + 2] = quad.bottom_left;
-                    occluder_vertex_buffer[occluder_vertex_count + 3] = quad.bottom_right;
+                    shadow_vertex_buffer[shadow_vertex_count]     = quad.top_left;
+                    shadow_vertex_buffer[shadow_vertex_count + 1] = quad.top_right;
+                    shadow_vertex_buffer[shadow_vertex_count + 2] = quad.bottom_left;
+                    shadow_vertex_buffer[shadow_vertex_count + 3] = quad.bottom_right;
 
-                    occluder_vertex_count += 4;
+                    shadow_vertex_count += 4;
                 }
 
                 // glViewport(active_viewport_x_offset,
@@ -1403,7 +1409,7 @@ r_experimental_rendering :: (render_state: *Render_State, asset_manager: *Asset_
                     glBufferSubData(GL_ARRAY_BUFFER,
                                     0,
                                     ((occluder_count * 4) * size_of(Vertex)),
-                                    occluder_vertex_buffer.data);
+                                    shadow_vertex_buffer.data);
 
                     render_state.update_uniform(render_state.shadow_caster_shader,
                                                 "uViewMatrix",
@@ -1416,7 +1422,7 @@ r_experimental_rendering :: (render_state: *Render_State, asset_manager: *Asset_
                     r_update_shader_data(null, render_state.shadow_caster_shader);
 
                     glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, render_state.primary_ebo_id);
-                    glDrawElements(GL_TRIANGLES, occluder_count * 6, GL_UNSIGNED_INT, null);
+                    glDrawElements(GL_TRIANGLES, shadow_counter * 6, GL_UNSIGNED_INT, null);
                     active_viewport_x_offset += 256;
                     if active_viewport_x_offset < 8096
                     {
