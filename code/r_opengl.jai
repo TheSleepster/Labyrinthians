@@ -1408,7 +1408,7 @@ r_experimental_rendering :: (render_state: *Render_State, asset_manager: *Asset_
                     glBindBuffer(GL_ARRAY_BUFFER, render_state.primary_vbo_id);
                     glBufferSubData(GL_ARRAY_BUFFER,
                                     0,
-                                    ((occluder_count * 4) * size_of(Vertex)),
+                                    ((shadow_counter * 4) * size_of(Vertex)),
                                     shadow_vertex_buffer.data);
 
                     render_state.update_uniform(render_state.shadow_caster_shader,
@@ -1429,6 +1429,10 @@ r_experimental_rendering :: (render_state: *Render_State, asset_manager: *Asset_
                         active_viewport_y_offset += 256;
                         active_viewport_x_offset  = 0;
                     }
+                }
+
+                // NOTE(Sleepster): Render the occluders to remove shadows. 
+                {
                 }
             }
         }
