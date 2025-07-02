@@ -1335,7 +1335,7 @@ r_experimental_rendering :: (render_state: *Render_State, asset_manager: *Asset_
                                     end_dir_norm    := normalize(direction_end);
 
                                     projected_start := current_light.ws_position + (start_dir_norm * current_light.light_data.radius);
-                                    projected_end   := current_light.ws_position + (end_dir_norm   * (current_light.light_data.radius * 1.20));
+                                    projected_end   := current_light.ws_position + (end_dir_norm   * (current_light.light_data.radius * 1.2));
 
                                     new_quad: Render_Quad;
 
@@ -1354,85 +1354,113 @@ r_experimental_rendering :: (render_state: *Render_State, asset_manager: *Asset_
                     working_quad_buffer = working_quad_buffer.next_buffer;
                 }
 
-                shadow_vertex_buffer: []Vertex = c_arena_push_array(*render_state.draw_frame_arena, Vertex, xx (shadow_counter * 4));
-                shadow_vertex_count : u32;
-
-                for shadow_index: 0..shadow_counter - 1
+                if occluder_count > 0
                 {
-                    quad := shadows[shadow_index];
+                    shadow_vertex_buffer: []Vertex = c_arena_push_array(*render_state.draw_frame_arena, Vertex, xx (shadow_counter * 4));
+                    shadow_vertex_count : u32;
 
-                    shadow_vertex_buffer[shadow_vertex_count]     = quad.top_left;
-                    shadow_vertex_buffer[shadow_vertex_count + 1] = quad.top_right;
-                    shadow_vertex_buffer[shadow_vertex_count + 2] = quad.bottom_left;
-                    shadow_vertex_buffer[shadow_vertex_count + 3] = quad.bottom_right;
-
-                    shadow_vertex_count += 4;
-                }
-
-                // glViewport(active_viewport_x_offset,
-                //            active_viewport_y_offset,
-                //            cast(u32)max_light_radius.x,
-                //            cast(u32)max_light_radius.y);
-
-                // NOTE(Sleepster): Render the light 
-                {
-                    lighting_color_attachments: []GLenum = .[GL_COLOR_ATTACHMENT1];
-                    glDrawBuffers(1, lighting_color_attachments.data);
-
-                    glEnable(GL_BLEND);
-                    glBlendEquation(GL_FUNC_ADD);
-                    glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
-                    glColorMask(GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE);  
-
-
-                    assert(render_state.light_rendering_shader != null);
-                    glUseProgram(render_state.light_rendering_shader.program_id);
-
-                    render_state.update_UBO(render_state.light_rendering_shader,
-                                            "uPointLight",
-                                             current_light.light_data);
-
-                    render_state.update_uniform(render_state.light_rendering_shader,
-                                                "uProjectionMatrix",
-                                                *render_state.draw_frame.active_projection_matrix._11);
-                    
-                    r_update_shader_data(null, render_state.light_rendering_shader);
-                    glDrawArrays(GL_TRIANGLES, 0, 6);
-                }
-
-                // NOTE(Sleepster): Render the shadow quads 
-                {
-                    assert(render_state.shadow_caster_shader != null);
-                    glUseProgram(render_state.shadow_caster_shader.program_id);
-
-                    glBindBuffer(GL_ARRAY_BUFFER, render_state.primary_vbo_id);
-                    glBufferSubData(GL_ARRAY_BUFFER,
-                                    0,
-                                    ((shadow_counter * 4) * size_of(Vertex)),
-                                    shadow_vertex_buffer.data);
-
-                    render_state.update_uniform(render_state.shadow_caster_shader,
-                                                "uViewMatrix",
-                                                *render_state.draw_frame.active_view_matrix._11);
-
-                    render_state.update_uniform(render_state.shadow_caster_shader,
-                                                "uProjectionMatrix",
-                                                *render_state.draw_frame.active_projection_matrix._11);
-
-                    r_update_shader_data(null, render_state.shadow_caster_shader);
-
-                    glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, render_state.primary_ebo_id);
-                    glDrawElements(GL_TRIANGLES, shadow_counter * 6, GL_UNSIGNED_INT, null);
-                    active_viewport_x_offset += 256;
-                    if active_viewport_x_offset < 8096
+                    for shadow_index: 0..shadow_counter - 1
                     {
-                        active_viewport_y_offset += 256;
-                        active_viewport_x_offset  = 0;
-                    }
-                }
+                        quad := shadows[shadow_index];
 
-                // NOTE(Sleepster): Render the occluders to remove shadows. 
-                {
+                        shadow_vertex_buffer[shadow_vertex_count]     = quad.bottom_left;
+                        shadow_vertex_buffer[shadow_vertex_count + 1] = quad.top_left;
+                        shadow_vertex_buffer[shadow_vertex_count + 2] = quad.top_right;
+                        shadow_vertex_buffer[shadow_vertex_count + 3] = quad.bottom_right;
+
+                        shadow_vertex_count += 4;
+                    }
+
+                    // glViewport(active_viewport_x_offset,
+                    //            active_viewport_y_offset,
+                    //            cast(u32)max_light_radius.x,
+                    //            cast(u32)max_light_radius.y);
+
+                    // NOTE(Sleepster): Render the light 
+                    {
+                        lighting_color_attachments: []GLenum = .[GL_COLOR_ATTACHMENT1];
+                        glDrawBuffers(1, lighting_color_attachments.data);
+
+                        glEnable(GL_BLEND);
+                        glBlendEquation(GL_FUNC_ADD);
+                        glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+                        glColorMask(GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE);  
+
+
+                        assert(render_state.light_rendering_shader != null);
+                        glUseProgram(render_state.light_rendering_shader.program_id);
+
+                        render_state.update_UBO(render_state.light_rendering_shader,
+                                                "uPointLight",
+                                                current_light.light_data);
+
+                        render_state.update_uniform(render_state.light_rendering_shader,
+                                                    "uProjectionMatrix",
+                                                    *render_state.draw_frame.active_projection_matrix._11);
+
+                        r_update_shader_data(null, render_state.light_rendering_shader);
+                        glDrawArrays(GL_TRIANGLES, 0, 6);
+                    }
+
+                    // NOTE(Sleepster): Render the shadow quads 
+                    {
+                        assert(render_state.shadow_caster_shader != null);
+                        glUseProgram(render_state.shadow_caster_shader.program_id);
+
+                        glBindBuffer(GL_ARRAY_BUFFER, render_state.primary_vbo_id);
+                        glBufferSubData(GL_ARRAY_BUFFER,
+                                        0,
+                                        ((shadow_counter * 4) * size_of(Vertex)),
+                                        shadow_vertex_buffer.data);
+
+                        render_state.update_uniform(render_state.shadow_caster_shader,
+                                                    "uViewMatrix",
+                                                    *render_state.draw_frame.active_view_matrix._11);
+
+                        render_state.update_uniform(render_state.shadow_caster_shader,
+                                                    "uProjectionMatrix",
+                                                    *render_state.draw_frame.active_projection_matrix._11);
+
+                        r_update_shader_data(null, render_state.shadow_caster_shader);
+
+                        glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, render_state.primary_ebo_id);
+                        glDrawElements(GL_TRIANGLES, shadow_counter * 6, GL_UNSIGNED_INT, null);
+                    }
+
+                    // NOTE(Sleepster): Render the occluders to remove shadows. 
+                    {
+                        occluder_vertex_buffer := c_arena_push_array(*render_state.draw_frame_arena, Vertex, xx(occluder_count * 4));
+                        occluder_vertex_count: u32;
+                        
+                        for occluder_index: 0..occluder_count - 1
+                        {
+                            occluder: *Render_Quad = *occluders[occluder_index];
+
+                            occluder_vertex_buffer[occluder_vertex_count]     = occluder.bottom_left;
+                            occluder_vertex_buffer[occluder_vertex_count + 1] = occluder.top_left;
+                            occluder_vertex_buffer[occluder_vertex_count + 2] = occluder.top_right;
+                            occluder_vertex_buffer[occluder_vertex_count + 3] = occluder.bottom_right;
+
+                            occluder_vertex_count += 4;
+                        }
+                        
+                        glBindBuffer(GL_ARRAY_BUFFER, render_state.primary_vbo_id);
+                        glBufferSubData(GL_ARRAY_BUFFER,
+                                        0,
+                                        ((occluder_count * 4) * size_of(Vertex)),
+                                        occluder_vertex_buffer.data);
+                        glDrawElements(GL_TRIANGLES,
+                                       occluder_count * 6,
+                                       GL_UNSIGNED_INT,
+                                       null);
+
+                        active_viewport_x_offset += 256;
+                        if active_viewport_x_offset < 8096
+                        {
+                            active_viewport_y_offset += 256;
+                            active_viewport_x_offset  = 0;
+                        }
+                    }
                 }
             }
         }
