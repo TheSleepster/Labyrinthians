@@ -6,33 +6,3 @@ BASIC_SHADER_SOURCE_TEXT :: #run -> string
 {
     return read_entire_file("shaders/basic_forward_shader.glsl");
 };
-
-LIGHT_CLUSTERING_COMPUTE_SHADER :: #run -> string
-{
-    return read_entire_file("shaders/forward_light_clustering.glsl");
-};
-
-SHADOW_MAP_SHADER :: #run -> string
-{
-    return read_entire_file("shaders/shadow_map_shader.glsl");
-}
-
-VERTEX_NORMALS_EXTRACTION_SHADER :: #run -> string
-{
-    return read_entire_file("shaders/vertex_normals_extraction_shader.glsl");
-}
-
-EX_FORWARD_SHADER :: #run -> string
-{
-    return read_entire_file("shaders/ex_forward_shader.glsl");
-}
-
-EX_LIGHTING_PASS_SHADER :: #run -> string
-{
-    return read_entire_file("shaders/ex_lighting_pass.glsl");
-}
-
-EX_OCCLUSION_SHADER :: #run -> string
-{
-    return read_entire_file("shaders/ex_shadow_geometry_render.glsl");
-}

@@ -1158,47 +1158,7 @@ r_render_group_test_render :: (render_state: *Render_State, asset_manager: *Asse
     glClearDepth(0.0);
     glClear(GL_COLOR_BUFFER_BIT|GL_DEPTH_BUFFER_BIT);
 
-    // NOTE(Sleepster): Clustered Lighting Compute Shader 
-    if render_state.draw_frame.light_count > 0
-    {
-        window_size           := global_window_data.current_window_size;
-        light_indices_size    := size_of(s32) * ((window_size.x / 16) * (window_size.y / 16)) * MAX_LIGHTS_PER_TILE_CLUSTER;
-        tile_light_count_size := size_of(s32) * ((window_size.x / 16) * (window_size.y / 16));
-
-        screen_tile_size := (Vector2).{xx ((window_size.x + 15) / 16), xx ((window_size.y + 15) / 16)};
-        
-        shader := render_state.lighting_cluster_compute_shader;
-        if global_window_data.current_window_size != global_window_data.old_window_size
-        {
-            render_state.resize_shader_buf(shader, "LightIndicesSBO", light_indices_size);
-            render_state.resize_shader_buf(shader, "TileLightCountSBO", tile_light_count_size);
-        }
-        TileSize: s32 = 16;
-        max_lights_per_cluster: s32 = MAX_LIGHTS_PER_TILE_CLUSTER;
-
-        glUseProgram(shader.program_id);
-        render_state.update_uniform(shader,
-                                   "uLightCount",
-                                   *render_state.draw_frame.light_count);
-        render_state.update_uniform(shader,
-                                   "uTileSize",
-                                   *TileSize);
-        render_state.update_uniform(shader,
-                                   "uMaxLightsPerTileCluster",
-                                   *max_lights_per_cluster);
-        render_state.update_uniform(shader,
-                                   "uScreenTileSize",
-                                   *screen_tile_size);
-        render_state.update_buffer(shader,
-                                   "PointLightSBO",
-                                   size_of(Shader_Light_Data) * render_state.draw_frame.light_count,
-                                   render_state.draw_frame.shader_point_light_buffer.data);
-
-        r_update_shader_data(null, shader);
-        glDispatchCompute(xx screen_tile_size.x, xx screen_tile_size.y, 1);
-
-        glMemoryBarrier(GL_SHADER_STORAGE_BARRIER_BIT);
-    }
+    glEnable(GL_DEPTH_TEST);
 
     glBindVertexArray(render_state.primary_vao_id);
 
@@ -1240,286 +1200,103 @@ r_render_group_test_render :: (render_state: *Render_State, asset_manager: *Asse
     }
 }
 
-#no_reset experimental_init: bool = false;
+#no_reset expermiental_init: bool = false;
 r_experimental_rendering :: (render_state: *Render_State, asset_manager: *Asset_Manager)
 {
     render_engine_width : u32 = 320;
     render_engine_height: u32 = 180;
+    
+    render_framebuffers : [2]u32;
+    ffb_diffuse_texture :    u32;
+    ffb_normals_texture :    u32;
+    ffb_position_texture:    u32;
 
-    lighting_texture: u32;
-    if !experimental_init
+    sfb_light_map       :    u32;
+    
+    if !expermiental_init
     {
-        glGenFramebuffers(1, *render_state.ex_framebuffer_ID);
-        glGenTextures(1, *render_state.ex_color_attachment0);
-        glGenTextures(1, *lighting_texture);
+        glGenFramebuffers(2, render_framebuffers.data);
+        glGenTextures(1, *ffb_diffuse_texture);
+        glGenTextures(1, *ffb_normals_texture);
+        glGenTextures(1, *ffb_position_texture);
+        glGenTextures(1, *sfb_light_map);
 
+        // NOTE(Sleepster): DIFFUSE TEXTURE 
+        {
+            glBindTexture(GL_TEXTURE_2D, ffb_diffuse_texture);
+            glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+            glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
 
-        glBindTexture(GL_TEXTURE_2D, render_state.ex_color_attachment0);
-        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
-        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+            glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
+            glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
 
-        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
-        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
+            glTexImage2D(GL_TEXTURE_2D, 0, GL_SRGB_ALPHA, render_engine_width, render_engine_height, 0, GL_RGBA, GL_UNSIGNED_BYTE, null);
+        }
 
-        glTexImage2D(GL_TEXTURE_2D, 0, GL_SRGB_ALPHA, render_engine_width, render_engine_height, 0, GL_RGBA, GL_UNSIGNED_BYTE, null);
+        // NOTE(Sleepster): NORMAL MAP 
+        {
+            glBindTexture(GL_TEXTURE_2D, ffb_normals_texture);
+            glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+            glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
 
-        glBindTexture(GL_TEXTURE_2D, lighting_texture);
-        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
-        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+            glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
+            glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
 
-        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
-        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
+            glTexImage2D(GL_TEXTURE_2D, 0, GL_SRGB_ALPHA, render_engine_width, render_engine_height, 0, GL_RGBA, GL_UNSIGNED_BYTE, null);
+        }
 
-        glTexImage2D(GL_TEXTURE_2D, 0, GL_SRGB_ALPHA, render_engine_width, render_engine_height, 0, GL_RGBA, GL_UNSIGNED_BYTE, null);
-        
-        glBindFramebuffer(GL_FRAMEBUFFER, render_state.ex_framebuffer_ID);
-        glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, render_state.ex_color_attachment0, 0);
-        glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT1, GL_TEXTURE_2D, lighting_texture, 0);
+        // NOTE(Sleepster): Position Texture
+        {
+            glBindTexture(GL_TEXTURE_2D, ffb_position_texture);
+            glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+            glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
 
-        color_attachments: []GLenum = .[GL_COLOR_ATTACHMENT1];
-        glDrawBuffers(xx color_attachments.count, color_attachments.data);
+            glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
+            glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
+
+            glTexImage2D(GL_TEXTURE_2D, 0, GL_SRGB_ALPHA, render_engine_width, render_engine_height, 0, GL_RGBA, GL_UNSIGNED_BYTE, null);
+        }
+
+        // NOTE(Sleepster): LIGHT MAP 
+        {
+            glBindTexture(GL_TEXTURE_2D, sfb_light_map);
+            glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+            glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+
+            glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
+            glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
+
+            glTexImage2D(GL_TEXTURE_2D, 0, GL_SRGB_ALPHA, render_engine_width, render_engine_height, 0, GL_RGBA, GL_UNSIGNED_BYTE, null);
+        }
+
+        // NOTE(Sleepster): FIRST FRAMEBUFFER 
+        {
+            glBindFramebuffer(GL_FRAMEBUFFER, render_framebuffers[0]);
+            glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, ffb_diffuse_texture, 0);
+            glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT1, GL_TEXTURE_2D, ffb_normals_texture, 0);
+            glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT2, GL_TEXTURE_2D, ffb_position_texture, 0);
+
+            color_attachments: []GLenum = .[GL_COLOR_ATTACHMENT0, GL_COLOR_ATTACHMENT1, GL_COLOR_ATTACHMENT2];
+            glDrawBuffers(xx color_attachments.count, color_attachments.data);
+        }
+
+        // NOTE(Sleepster): SECOND FRAMEBUFFER
+        {
+            glBindFramebuffer(GL_FRAMEBUFFER, render_framebuffers[1]);
+            glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, sfb_light_map, 0);
+
+            color_attachments: []GLenum = .[GL_COLOR_ATTACHMENT0];
+            glDrawBuffers(xx color_attachments.count, color_attachments.data);
+        }
 
         glBindTexture(GL_TEXTURE_2D, 0);
         glBindFramebuffer(GL_FRAMEBUFFER, 0);
-        
-        experimental_init = true;
+
+        expermiental_init = true;
     }
 
-    glBindFramebuffer(GL_FRAMEBUFFER, render_state.ex_framebuffer_ID);
-    glDisable(GL_DEPTH_TEST);
-
-    glClearColor(0.0, 0.0, 0.0, 1.0);
-    glClear(GL_COLOR_BUFFER_BIT);
-    glBindVertexArray(render_state.primary_vao_id);
-
-    // TODO(Sleepster): Four lights at a time? 
-    active_viewport_x_offset: s32;
-    active_viewport_y_offset: s32;
-    max_light_radius        : Vector2 = .{256, 256};
-    if render_state.draw_frame.light_count > 0
-    {
-        occluders     : [100]Render_Quad;
-        occluder_count: u32;
-            
-        for light_index: 0..render_state.draw_frame.light_count
-        {
-            shadows       : [100]Render_Quad;
-            shadow_counter: u32;
-
-            current_light := *render_state.draw_frame.engine_point_light_buffer[light_index];
-            if current_light.light_data != null
-            {
-                working_quad_buffer := *render_state.draw_frame.quad_buffers;
-                while working_quad_buffer
-                {
-                    for quad_index: 0..(working_quad_buffer.quad_count + working_quad_buffer.t_quad_count) - 1
-                    {
-                        working_quad := *working_quad_buffer.quad_buffer[quad_index];
-                        assert(working_quad != null);
-                        if working_quad.render_options & .RO_OCCLUDER
-                        {
-                            if is_quad_within_light_radius(current_light, working_quad)
-                            {
-                                occluders[occluder_count] = working_quad.*;
-                                occluder_count += 1;
-                                
-                                for vertex_index: 0..4 - 1
-                                {
-                                    edge_start := working_quad.elements[vertex_index].vPosition.xy;
-                                    edge_end   := working_quad.elements[(vertex_index + 1) % 4].vPosition.xy;
-
-                                    direction_start := edge_start - current_light.ws_position;
-                                    direction_end   := edge_end   - current_light.ws_position;
-
-                                    start_dir_norm  := normalize(direction_start);
-                                    end_dir_norm    := normalize(direction_end);
-
-                                    projected_start := current_light.ws_position + (start_dir_norm * current_light.light_data.radius);
-                                    projected_end   := current_light.ws_position + (end_dir_norm   * (current_light.light_data.radius * 1.2));
-
-                                    new_quad: Render_Quad;
-
-                                    new_quad.top_left.vPosition     = v2_expand(edge_start, 0, 1);
-                                    new_quad.top_right.vPosition    = v2_expand(edge_end, 0, 1);
-                                    new_quad.bottom_left.vPosition  = v2_expand(projected_end, 0, 1);
-                                    new_quad.bottom_right.vPosition = v2_expand(projected_start, 0, 1);
-
-                                    shadows[shadow_counter] = new_quad;
-                                    shadow_counter += 1;
-                                }
-                            }
-                        }
-                    }
-                    
-                    working_quad_buffer = working_quad_buffer.next_buffer;
-                }
-
-                if occluder_count > 0
-                {
-                    shadow_vertex_buffer: []Vertex = c_arena_push_array(*render_state.draw_frame_arena, Vertex, xx (shadow_counter * 4));
-                    shadow_vertex_count : u32;
-
-                    for shadow_index: 0..shadow_counter - 1
-                    {
-                        quad := shadows[shadow_index];
-
-                        shadow_vertex_buffer[shadow_vertex_count]     = quad.bottom_left;
-                        shadow_vertex_buffer[shadow_vertex_count + 1] = quad.top_left;
-                        shadow_vertex_buffer[shadow_vertex_count + 2] = quad.top_right;
-                        shadow_vertex_buffer[shadow_vertex_count + 3] = quad.bottom_right;
-
-                        shadow_vertex_count += 4;
-                    }
-
-                    // glViewport(active_viewport_x_offset,
-                    //            active_viewport_y_offset,
-                    //            cast(u32)max_light_radius.x,
-                    //            cast(u32)max_light_radius.y);
-
-                    // NOTE(Sleepster): Render the light 
-                    {
-                        lighting_color_attachments: []GLenum = .[GL_COLOR_ATTACHMENT1];
-                        glDrawBuffers(1, lighting_color_attachments.data);
-
-                        glEnable(GL_BLEND);
-                        glBlendEquation(GL_FUNC_ADD);
-                        glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
-                        glColorMask(GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE);  
-
-
-                        assert(render_state.light_rendering_shader != null);
-                        glUseProgram(render_state.light_rendering_shader.program_id);
-
-                        render_state.update_UBO(render_state.light_rendering_shader,
-                                                "uPointLight",
-                                                current_light.light_data);
-
-                        render_state.update_uniform(render_state.light_rendering_shader,
-                                                    "uProjectionMatrix",
-                                                    *render_state.draw_frame.active_projection_matrix._11);
-
-                        r_update_shader_data(null, render_state.light_rendering_shader);
-                        glDrawArrays(GL_TRIANGLES, 0, 6);
-                    }
-
-                    // NOTE(Sleepster): Render the shadow quads 
-                    {
-                        assert(render_state.shadow_caster_shader != null);
-                        glUseProgram(render_state.shadow_caster_shader.program_id);
-
-                        glBindBuffer(GL_ARRAY_BUFFER, render_state.primary_vbo_id);
-                        glBufferSubData(GL_ARRAY_BUFFER,
-                                        0,
-                                        ((shadow_counter * 4) * size_of(Vertex)),
-                                        shadow_vertex_buffer.data);
-
-                        render_state.update_uniform(render_state.shadow_caster_shader,
-                                                    "uViewMatrix",
-                                                    *render_state.draw_frame.active_view_matrix._11);
-
-                        render_state.update_uniform(render_state.shadow_caster_shader,
-                                                    "uProjectionMatrix",
-                                                    *render_state.draw_frame.active_projection_matrix._11);
-
-                        r_update_shader_data(null, render_state.shadow_caster_shader);
-
-                        glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, render_state.primary_ebo_id);
-                        glDrawElements(GL_TRIANGLES, shadow_counter * 6, GL_UNSIGNED_INT, null);
-                    }
-
-                    // NOTE(Sleepster): Render the occluders to remove shadows. 
-                    {
-                        occluder_vertex_buffer := c_arena_push_array(*render_state.draw_frame_arena, Vertex, xx(occluder_count * 4));
-                        occluder_vertex_count: u32;
-                        
-                        for occluder_index: 0..occluder_count - 1
-                        {
-                            occluder: *Render_Quad = *occluders[occluder_index];
-
-                            occluder_vertex_buffer[occluder_vertex_count]     = occluder.bottom_left;
-                            occluder_vertex_buffer[occluder_vertex_count + 1] = occluder.top_left;
-                            occluder_vertex_buffer[occluder_vertex_count + 2] = occluder.top_right;
-                            occluder_vertex_buffer[occluder_vertex_count + 3] = occluder.bottom_right;
-
-                            occluder_vertex_count += 4;
-                        }
-                        
-                        glBindBuffer(GL_ARRAY_BUFFER, render_state.primary_vbo_id);
-                        glBufferSubData(GL_ARRAY_BUFFER,
-                                        0,
-                                        ((occluder_count * 4) * size_of(Vertex)),
-                                        occluder_vertex_buffer.data);
-                        glDrawElements(GL_TRIANGLES,
-                                       occluder_count * 6,
-                                       GL_UNSIGNED_INT,
-                                       null);
-
-                        active_viewport_x_offset += 256;
-                        if active_viewport_x_offset < 8096
-                        {
-                            active_viewport_y_offset += 256;
-                            active_viewport_x_offset  = 0;
-                        }
-                    }
-                }
-            }
-        }
-    }
-
-    lighting_color_attachments: []GLenum = .[GL_COLOR_ATTACHMENT0];
-    glDrawBuffers(1, lighting_color_attachments.data);
-
-    glViewport(0, 0, render_engine_width, render_engine_height);
-    glClearColor(0.0, 0.0, 0.0, 1.0);
-    glClear(GL_COLOR_BUFFER_BIT);
-
-    glEnable(GL_BLEND);        
-    glBlendEquation(GL_FUNC_ADD);
-    glBlendFunc(GL_ONE, GL_ONE_MINUS_SRC_COLOR);
-
-
-    // NOTE(Sleepster): Primary Geometry Pass 
-    r_handle_group_buffers(render_state);
-    r_handle_lighting_data(render_state);
-    for group_index: 0..render_state.draw_frame.render_group_counter - 1
-    {
-        working_group := render_state.draw_frame.render_groups[group_index];
-        shader := working_group.bound_shader;
-        glUseProgram(shader.program_id);
-
-        opaque_quad_count := working_group.current_quad_count - working_group.t_quad_count;
-        glBindBuffer(GL_ARRAY_BUFFER, render_state.primary_vbo_id);
-        glBufferSubData(GL_ARRAY_BUFFER,
-                        0,
-                        (working_group.vertex_count * size_of(Vertex)),
-                        working_group.vertex_buffer.data);
-
-        glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, render_state.primary_ebo_id);
-        r_update_shader_data(working_group, shader);
-        if opaque_quad_count > 0
-        {
-            glDrawElements(GL_TRIANGLES,
-                           opaque_quad_count * 6,
-                           GL_UNSIGNED_INT,
-                           null);
-        }
-        if working_group.t_quad_count > 0
-        {
-            glDrawElements(GL_TRIANGLES,
-                           working_group.t_quad_count * 6,
-                           GL_UNSIGNED_INT,
-                           cast(*void)((opaque_quad_count * 6) * size_of(u32)));
-        }
-    }
-
-    client_size := global_window_data.current_window_size;
-    glBindFramebuffer(GL_READ_FRAMEBUFFER, render_state.ex_framebuffer_ID);
-    glBindFramebuffer(GL_DRAW_FRAMEBUFFER, 0);
-    glBlitFramebuffer(0, 0, 320, 180, 0, 0, client_size.x, client_size.y, GL_COLOR_BUFFER_BIT, GL_NEAREST);
-
-    // NOTE(Sleepster): Final blend 
-    {
-    }
+    glBindFramebuffer(GL_FRAMEBUFFER, render_framebuffers[0]);
+    glBindFramebuffer(GL_FRAMEBUFFER, render_framebuffers[1]);
 }
 
 r_reset_draw_frame :: (render_state: *Render_State)
