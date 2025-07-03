@@ -21,6 +21,8 @@ BUFFER SETUP:
        - Render Layer is baked into the 3rd channel.
        - Lighting related rendering options are baked into the 4th channel
 
+     - 24 bit depth texture
+
    - Second Framebuffer, this is the lighting buffer. It contains:
      - RGBA Texture
        - This is where all the lights are initially rendered.

@@ -222,6 +222,7 @@ r_create_draw_quad :: (render_state  : *Render_State,
     {
         element.vColor         = draw_color;
         element.vRenderOptions = render_options;
+        element.vRenderLayer   = render_state.draw_frame.current_render_layer;
     }
 
     return culled, quad;

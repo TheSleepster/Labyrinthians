@@ -20,6 +20,7 @@ layout(location = 2) in vec3 vVSNormals;
 layout(location = 3) in vec2 vTexelData;
 layout(location = 4) in uint vRenderingOptions;
 layout(location = 5) in uint vTextureIndex;
+layout(location = 6) in uint vRenderLayer;
 
 uniform mat4 uProjectionMatrix;
 uniform mat4 uViewMatrix;

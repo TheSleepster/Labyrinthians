@@ -82,6 +82,7 @@ am_init :: () -> Asset_Manager
 
     // TODO(Sleepster): Maybe if this gets too slow, use a compile tile hash index search.
     asset_add_shader_to_hash(*result, BASIC_SHADER_SOURCE_TEXT, "Basic_Shader", basic_shader_SSBO_configs, .PIXEL);
+    asset_add_shader_to_hash(*result, EX_GBUFFER_SHADER_TEXT,   "gBuffer_Shader", .[], .PIXEL);
 
 
     default_material: *Render_Material = c_arena_push_struct(*result.permanent_asset_arena, Render_Material);
