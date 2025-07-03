@@ -1,0 +1,68 @@
+TODO:
+
+DEFERRED RENDERER:
+What things need to be tracked in the gBuffer?
+    - World Position
+    - Render Layer
+    - Vertex Normals (sourced from a texture or natural normals)
+    - Diffuse Color
+    - Render Options
+
+BUFFER SETUP:
+   - First Framebuffer, this is the gBuffer. It contains:
+     - RGBA Texture
+       - Diffuse Texture
+
+     - RGBA Texture
+       - Normals Texture
+
+     - RGBA Texture
+       - World Position Texture.
+       - Render Layer is baked into the 3rd channel.
+       - Lighting related rendering options are baked into the 4th channel
+
+   - Second Framebuffer, this is the lighting buffer. It contains:
+     - RGBA Texture
+       - This is where all the lights are initially rendered.
+
+DRAW CALL DATA:
+
+1st draw call:
+  - Bind the first framebuffer (gBuffer)
+    - We render out all the geometry to the diffuse texture, while we do
+        this we use MRT to render out the world_position, the
+        render_layer, and the lighting related render_options into the
+        second RGBA texture for later use.
+
+2nd draw call:
+  - Still on the first framebuffer
+    - We then bind a normal texture atlas if it is there, and render
+      out all the vertex normal data out to the normal texture of this
+      framebuffer. For primitives that don't have anything to pull
+      from an normal atlas, we will simply render out the default
+      vertex normals.
+
+A note on these two draw calls on the first framebuffer:
+
+  I'm not exactly happy about having to do 2 sets of draw calls here,
+  but it really is needed. The first draw call here is meant to render
+  the geometry in the scene the same way our current forward+ renderer
+  does. Sampling the textures from the render groups as needed,
+  binding the correct uniforms, essentially the exact group approach
+  as before. Only in a deferred renderer this time. Doing everything
+  this pass along with the normal outputs is just not possible unless
+  I want to remove the ability for the user to use a normals atlas for
+  normals that are beyond that of the default vertex normals, which I
+  don't want to be the case.
+
+3rd draw call:
+  - Bind the Second Framebuffer
+    - Render all the lighting into this framebuffer using a single
+      fullscreen quad as the output.
+
+4th draw call:
+  - Bind the Primary Framebuffer provided by OpenGL on context
+    creation, using the data in the gBuffer and the lighting texture,
+    mix both the lighting texture and the diffuse texture colors into
+    the final output buffer and render the final output.
+    
