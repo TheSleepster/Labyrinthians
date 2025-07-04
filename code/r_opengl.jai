@@ -1090,7 +1090,7 @@ DEBUG_draw_test_sprites_experimental :: (render_state: *Render_State, asset_mana
                                                                                      -1.0,
                                                                                       1.0);
     r_push_render_layer(render_state, 17);
-    r_draw_quad(render_state, .{-300,-160}, .{640, 360}, .{0.1, 0.1, 0.1, 1});
+    r_draw_quad(render_state, .{-300,-160}, .{640, 360}, .{0.01, 0.01, 0.01, 1});
     r_push_render_layer(render_state, 16);
 
 
@@ -1185,20 +1185,20 @@ r_render_group_test_render :: (render_state: *Render_State, asset_manager: *Asse
         }
     }
 }
+    
+render_framebuffers : [2]u32;
+ffb_diffuse_texture :    u32;
+ffb_normals_texture :    u32;
+ffb_position_texture:    u32;
+ffb_depth_texture   :    u32;
+
+sfb_light_map       :    u32;
 
 #no_reset expermiental_init: bool = false;
-r_experimental_rendering :: (render_state: *Render_State, asset_manager: *Asset_Manager)
+r_experimental_DEFERRED_rendering :: (render_state: *Render_State, asset_manager: *Asset_Manager)
 {
     render_engine_width : u32 = 320;
     render_engine_height: u32 = 180;
-    
-    render_framebuffers : [2]u32;
-    ffb_diffuse_texture :    u32;
-    ffb_normals_texture :    u32;
-    ffb_position_texture:    u32;
-    ffb_depth_texture   :    u32;
-
-    sfb_light_map       :    u32;
     
     if !expermiental_init
     {
@@ -1242,7 +1242,7 @@ r_experimental_rendering :: (render_state: *Render_State, asset_manager: *Asset_
             glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
             glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
 
-            glTexImage2D(GL_TEXTURE_2D, 0, GL_SRGB_ALPHA, render_engine_width, render_engine_height, 0, GL_RGBA, GL_UNSIGNED_BYTE, null);
+            glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA32F, render_engine_width, render_engine_height, 0, GL_RGBA, GL_FLOAT, null);
         }
 
         // NOTE(Sleepster): DEPTH TEXTURE
@@ -1296,14 +1296,28 @@ r_experimental_rendering :: (render_state: *Render_State, asset_manager: *Asset_
         expermiental_init = true;
     }
 
+    glEnable(GL_DEPTH_TEST);
+    glClear(GL_COLOR_BUFFER_BIT|GL_DEPTH_BUFFER_BIT);
     glBindFramebuffer(GL_FRAMEBUFFER, render_framebuffers[0]);
+
+    glEnable(GL_DEPTH_TEST);
+    glDisable(GL_BLEND);
+
+    glViewport(0, 0, 320, 180);
+    glClearColor(0.0, 0.0, 0.0, 1.0);
+    glClearDepth(0.0);
+    glClear(GL_COLOR_BUFFER_BIT|GL_DEPTH_BUFFER_BIT);
+
+
+    glBindVertexArray(render_state.primary_vao_id);
+
+    shader := asset_get_shader(asset_manager, "gBuffer_Shader");
+    glUseProgram(shader.program_id);
 
     r_handle_group_buffers(render_state);
     for group_index: 0..render_state.draw_frame.render_group_counter - 1
     {
         working_group := render_state.draw_frame.render_groups[group_index];
-        shader := working_group.bound_shader;
-        glUseProgram(shader.program_id);
 
         opaque_quad_count := working_group.current_quad_count - working_group.t_quad_count;
         glBindBuffer(GL_ARRAY_BUFFER, render_state.primary_vbo_id);
@@ -1345,6 +1359,7 @@ r_reset_draw_frame :: (render_state: *Render_State)
     render_state.draw_frame.current_render_layer = 32;
     render_state.draw_frame                      = .{};
 
+    // TODO(Sleepster): ????
     previous_window_size := global_window_data.old_window_size;
     window_size          := global_window_data.current_window_size;
 }

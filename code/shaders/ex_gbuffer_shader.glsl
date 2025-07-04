@@ -39,9 +39,9 @@ main()
 {
     vec4 csPosition = uProjectionMatrix * uViewMatrix * vPosition;
 
+    vOutgBufferPos       = vPosition; 
     vOutColor            = vColor;
     vOutNormals          = vVSNormals;
-    vOutgBufferPos       = csPosition; 
     vOutTexelData        = vTexelData;
     vOutRenderingOptions = vRenderingOptions;
     vOutTexIndex         = vTextureIndex;
@@ -62,7 +62,7 @@ layout(location = 5) flat in uint vOutTexIndex;
 layout(location = 6) flat in uint vOutRenderLayer;
 
 layout(location = 0) out vec4 vOutDiffuseColor;
-layout(location = 1) out vec3 vOutNormalsColor;
+layout(location = 1) out vec4 vOutNormalsColor;
 layout(location = 2) out vec4 vOutPositionColor;
 
 uniform sampler2D uAtlasArray[16];
@@ -89,14 +89,7 @@ main()
     }
 
     // NOTE(Sleepster): Does not source from a normal texture 
-    if((vOutRenderingOptions & RO_NORMAL_MAPPED) == 0)
-    {
-        vOutNormalsColor = vOutNormals;
-    }
-    else
-    {
-        vOutNormalsColor = vec3(0.0);
-    }
+    vOutNormalsColor = vec4(vOutNormals, 1.0);
 
     vec2 gBufferExtraData = vec2(float(vOutRenderLayer), float(vOutRenderingOptions));
     vOutPositionColor = vec4(vOutgBufferPos.xy, gBufferExtraData);

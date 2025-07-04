@@ -75,7 +75,7 @@ L_labyrinthian_main :: ()
             //r_render_group_test_render(*render_state, *asset_manager);
 
             DEBUG_draw_test_sprites_experimental(*render_state, *asset_manager);
-            r_experimental_rendering(*render_state, *asset_manager);
+            r_experimental_DEFERRED_rendering(*render_state, *asset_manager);
 
             SDL_GL_SwapWindow(global_window_data.window);
 
