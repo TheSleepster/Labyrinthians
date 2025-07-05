@@ -326,7 +326,3 @@ r_handle_group_buffers :: (render_state: *Render_State)
                xx offset_of(Render_Group, #code stored_render_layer),
                8);
 }
-
-r_handle_lighting_data :: (render_state: *Render_State)
-{
-}

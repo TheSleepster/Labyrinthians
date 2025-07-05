@@ -11,3 +11,8 @@ EX_GBUFFER_SHADER_TEXT :: #run -> string
 {
     return read_entire_file("shaders/ex_gbuffer_shader.glsl");
 };
+
+EX_SHADOW_SHADER_TEST :: #run -> string
+{
+    return read_entire_file("shaders/ex_lighting_shader.glsl");
+}

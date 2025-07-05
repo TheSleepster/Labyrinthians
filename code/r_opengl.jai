@@ -28,6 +28,8 @@ MAX_LIGHTS                  :: 2048;
 MAX_LIGHTS_PER_TILE_CLUSTER :: 64;
 ENGINE_TEXTURE_SIZE         :: 2048;
 
+MAX_OCCLUDERS               :: 1024;
+
 r_default_render_material: *Render_Material;
 
 #no_reset uploaded_debug_texture: bool = false;
@@ -177,14 +179,18 @@ Draw_Frame :: struct
     active_shader             :  *GPU_Shader;
     active_render_material    :  *Render_Material;
     current_render_layer      :   u32;
+
+    render_groups             : []*Render_Group;
+    render_group_counter      :   u32;
+
+    occluder2D_quads          : []Render_Quad;
+    occluder2D_vertex_buffer  : []Vertex;
+    occluder2D_count          :   u32;
     
     // NOTE(Sleepster): Linked Lists 
     quad_buffers              :   Render_Group_Quad_Buffer;
     triangle_buffers          :   Render_Group_Triangle_Buffer;
     line_buffers              :   Render_Group_Line_Buffer;
-
-    render_groups             : []*Render_Group;
-    render_group_counter      :   u32;
 };
 
 Render_State :: struct
@@ -202,10 +208,6 @@ Render_State :: struct
     resize_shader_buf: (shader: *GPU_Shader, buffer_name : string, new_size: s64);
     update_uniform   : (shader: *GPU_Shader, uniform_name: string, data    : *void);
     update_UBO       : (shader: *GPU_Shader, UBO_name    : string, data    : *void);
-
-    lighting_cluster_compute_shader: *GPU_Shader;
-    lightmap_shader                : *GPU_Shader;
-    lit_geometry_mixing_shader     : *GPU_Shader;
 
     //EXPERIMENTAL
     ex_framebuffer_ID    : u32;
@@ -904,7 +906,8 @@ r_init_renderer_data :: (window: *SDL_Window, asset_manager: *Asset_Manager) -> 
         }
     }
 
-    r_default_render_material                    = asset_get_render_material(asset_manager, "Default_Material");
+    r_default_render_material         = asset_get_render_material(asset_manager, "Default_Material");
+    render_state.shadow_caster_shader = asset_get_shader(asset_manager, "ex_Shadow_Shader");
 
     render_state.update_buffer     = gl_shader_storage_buffer_object_update_buffer;
     render_state.resize_shader_buf = gl_resize_SSBO;
@@ -1266,7 +1269,7 @@ r_experimental_DEFERRED_rendering :: (render_state: *Render_State, asset_manager
             glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
             glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
 
-            glTexImage2D(GL_TEXTURE_2D, 0, GL_SRGB_ALPHA, render_engine_width, render_engine_height, 0, GL_RGBA, GL_UNSIGNED_BYTE, null);
+            glTexImage2D(GL_TEXTURE_2D, 0, GL_DEPTH_COMPONENT24, render_engine_width, render_engine_height, 0, GL_DEPTH_COMPONENT, GL_FLOAT, null);
         }
 
         // NOTE(Sleepster): FIRST FRAMEBUFFER 
@@ -1300,56 +1303,105 @@ r_experimental_DEFERRED_rendering :: (render_state: *Render_State, asset_manager
     glClear(GL_COLOR_BUFFER_BIT|GL_DEPTH_BUFFER_BIT);
     glBindFramebuffer(GL_FRAMEBUFFER, render_framebuffers[0]);
 
-    glEnable(GL_DEPTH_TEST);
-    glDisable(GL_BLEND);
-
-    glViewport(0, 0, 320, 180);
-    glClearColor(0.0, 0.0, 0.0, 1.0);
-    glClearDepth(0.0);
-    glClear(GL_COLOR_BUFFER_BIT|GL_DEPTH_BUFFER_BIT);
-
-
-    glBindVertexArray(render_state.primary_vao_id);
-
-    shader := asset_get_shader(asset_manager, "gBuffer_Shader");
-    glUseProgram(shader.program_id);
-
-    r_handle_group_buffers(render_state);
-    for group_index: 0..render_state.draw_frame.render_group_counter - 1
+    // NOTE(Sleepster): GBUFFER PASS 
     {
-        working_group := render_state.draw_frame.render_groups[group_index];
+        glEnable(GL_DEPTH_TEST);
 
-        opaque_quad_count := working_group.current_quad_count - working_group.t_quad_count;
+        glViewport(0, 0, 320, 180);
+        glClearColor(0.0, 0.0, 0.0, 1.0);
+        glClearDepth(0.0);
+        glClear(GL_COLOR_BUFFER_BIT|GL_DEPTH_BUFFER_BIT);
+
+        glBindVertexArray(render_state.primary_vao_id);
+
+        shader := asset_get_shader(asset_manager, "gBuffer_Shader");
+        glUseProgram(shader.program_id);
+
+        r_handle_group_buffers(render_state);
+        for group_index: 0..render_state.draw_frame.render_group_counter - 1
+        {
+            working_group := render_state.draw_frame.render_groups[group_index];
+
+            opaque_quad_count := working_group.current_quad_count - working_group.t_quad_count;
+            glBindBuffer(GL_ARRAY_BUFFER, render_state.primary_vbo_id);
+            glBufferSubData(GL_ARRAY_BUFFER,
+                            0,
+                            (working_group.vertex_count * size_of(Vertex)),
+                            working_group.vertex_buffer.data);
+
+            glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, render_state.primary_ebo_id);
+            r_update_shader_data(working_group, shader);
+            if opaque_quad_count > 0
+            {
+                glDepthFunc(GL_GREATER);
+                glDepthMask(GL_TRUE);
+                glDrawElements(GL_TRIANGLES,
+                               opaque_quad_count * 6,
+                               GL_UNSIGNED_INT,
+                               null);
+            }
+            if working_group.t_quad_count > 0
+            {
+                glDepthFunc(GL_GEQUAL);
+                glDepthMask(GL_FALSE);
+                glDrawElements(GL_TRIANGLES,
+                               working_group.t_quad_count * 6,
+                               GL_UNSIGNED_INT,
+                               cast(*void)((opaque_quad_count * 6) * size_of(u32)));
+            }
+        }
+
+        glBindFramebuffer(GL_DRAW_FRAMEBUFFER, 0);
+        glBindFramebuffer(GL_READ_FRAMEBUFFER, render_framebuffers[0]);
+
+        glBlitFramebuffer(0,
+                          0,
+                          xx render_engine_width,
+                          xx render_engine_height,
+                          0,
+                          0,
+                          global_window_data.current_window_size.x,
+                          global_window_data.current_window_size.y,
+                          GL_COLOR_BUFFER_BIT,
+                          GL_NEAREST);
+    }
+
+    // NOTE(Sleepster): SHADOWS 
+    {
+        occluder_vertex_count: u32 = 0;
+        for occluder_index: 0..render_state.draw_frame.occluder2D_count
+        {
+            occluder := *render_state.draw_frame.occluder2D_quads[occluder_index];
+
+            render_state.draw_frame.occluder2D_vertex_buffer[occluder_vertex_count + 0] = occluder.bottom_left;
+            render_state.draw_frame.occluder2D_vertex_buffer[occluder_vertex_count + 1] = occluder.top_left;
+            render_state.draw_frame.occluder2D_vertex_buffer[occluder_vertex_count + 2] = occluder.top_right;
+            render_state.draw_frame.occluder2D_vertex_buffer[occluder_vertex_count + 3] = occluder.bottom_right;
+
+            occluder_vertex_count += 4;
+        }
+        
+        glBindFramebuffer(GL_FRAMEBUFFER, render_framebuffers[1]);
+        glUseProgram(render_state.shadow_caster_shader.program_id);
+
         glBindBuffer(GL_ARRAY_BUFFER, render_state.primary_vbo_id);
         glBufferSubData(GL_ARRAY_BUFFER,
                         0,
-                        (working_group.vertex_count * size_of(Vertex)),
-                        working_group.vertex_buffer.data);
+                       (occluder_vertex_count * size_of(Vertex)),
+                        render_state.draw_frame.occluder2D_quads.data);
 
-        glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, render_state.primary_ebo_id);
-        r_update_shader_data(working_group, shader);
-        if opaque_quad_count > 0
-        {
-            glDepthFunc(GL_GREATER);
-            glDepthMask(GL_TRUE);
-            glDrawElements(GL_TRIANGLES,
-                           opaque_quad_count * 6,
-                           GL_UNSIGNED_INT,
-                           null);
-        }
-        if working_group.t_quad_count > 0
-        {
-            glDepthFunc(GL_GEQUAL);
-            glDepthMask(GL_FALSE);
-            glDrawElements(GL_TRIANGLES,
-                           working_group.t_quad_count * 6,
-                           GL_UNSIGNED_INT,
-                           cast(*void)((opaque_quad_count * 6) * size_of(u32)));
-        }
+        render_state.update_uniform(render_state.shadow_caster_shader,
+                                   "uPointLightCount",
+                                   *render_state.draw_frame.light_count);
+
+        render_state.update_buffer(render_state.shadow_caster_shader,
+                                   "PointLightSBO",
+                                   size_of(Shader_Light_Data) * render_state.draw_frame.light_count,
+                                   render_state.draw_frame.shader_point_light_buffer.data);
+        
+        r_update_shader_data(null, render_state.shadow_caster_shader);
+        glDrawArraysInstanced(GL_TRIANGLES, 0, 6, render_state.draw_frame.light_count);
     }
-
-    glBindFramebuffer(GL_FRAMEBUFFER, render_framebuffers[1]);
-
 }
 
 r_reset_draw_frame :: (render_state: *Render_State)

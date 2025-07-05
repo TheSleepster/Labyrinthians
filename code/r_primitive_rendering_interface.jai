@@ -145,6 +145,7 @@ r_create_draw_quad :: (render_state  : *Render_State,
     quad.bottom_left.vVSNormals  = .{0, 1, 1};
     quad.bottom_right.vVSNormals = .{1, 1, 1};
     quad.top_right.vVSNormals    = .{0, 0, 1};
+
     if texture_id != U32_MAX
     {
         if !(render_options & xx Rendering_Options.RO_TEXEL_FETCHED)
@@ -223,6 +224,19 @@ r_create_draw_quad :: (render_state  : *Render_State,
         element.vColor         = draw_color;
         element.vRenderOptions = render_options;
         element.vRenderLayer   = render_state.draw_frame.current_render_layer;
+    }
+
+    if ((quad.render_options & .RO_OCCLUDER) != 0) && !culled
+    {
+        using render_state;
+        if draw_frame.occluder2D_quads.data == null
+        {
+            draw_frame.occluder2D_quads         = c_arena_push_array(*draw_frame_arena, Render_Quad, MAX_OCCLUDERS);
+            draw_frame.occluder2D_vertex_buffer = c_arena_push_array(*draw_frame_arena, Vertex,      MAX_OCCLUDERS * 4);
+        }
+
+        draw_frame.occluder2D_quads[draw_frame.occluder2D_count] = quad;
+        draw_frame.occluder2D_count += 1;
     }
 
     return culled, quad;
