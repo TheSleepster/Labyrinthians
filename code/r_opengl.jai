@@ -1287,10 +1287,7 @@ r_experimental_DEFERRED_rendering :: (render_state: *Render_State, asset_manager
         // NOTE(Sleepster): SECOND FRAMEBUFFER
         {
             glBindFramebuffer(GL_FRAMEBUFFER, render_framebuffers[1]);
-            glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, sfb_light_map, 0);
-
-            color_attachments: []GLenum = .[GL_COLOR_ATTACHMENT0];
-            glDrawBuffers(xx color_attachments.count, color_attachments.data);
+            glFramebufferTexture2D(GL_FRAMEBUFFER, GL_DEPTH_ATTACHMENT, GL_TEXTURE_2D, sfb_light_map, 0);
         }
 
         glBindTexture(GL_TEXTURE_2D, 0);
@@ -1364,6 +1361,9 @@ r_experimental_DEFERRED_rendering :: (render_state: *Render_State, asset_manager
                           global_window_data.current_window_size.y,
                           GL_COLOR_BUFFER_BIT,
                           GL_NEAREST);
+
+        glBindFramebuffer(GL_DRAW_FRAMEBUFFER, 0);
+        glBindFramebuffer(GL_READ_FRAMEBUFFER, 0);
     }
 
     // NOTE(Sleepster): SHADOWS 

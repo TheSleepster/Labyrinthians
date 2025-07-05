@@ -26,8 +26,8 @@ layout(std430, binding = 0) buffer PointLightSBO
     point_light PointLights[];
 };
 
-layout(location = 0)      out vDistanceToLight;
-layout(location = 1)      out vLightRadius;
+layout(location = 0) out float vDistanceToLight;
+layout(location = 1) out float vLightRadius;
 
 void
 main()
@@ -37,22 +37,23 @@ main()
     point_light WorkingLight = PointLights[gl_InstanceID];
 
     // NOTE(Sleepster): Should this be in World Space? 
-    vec2 LightPos    = PointLights[lightIndex].vsPosition;
-    vLightRadius     = PointLights[lightIndex].radius;
-    vDistanceToLight = vPosition - LightPos;
+    vec2 LightPos    = WorkingLight.vsPosition;
+    vec2 Difference  = vPosition - LightPos;
 
-    float Angle = atan(vDistanceToLight.y, vDistnaceToLight.x);
+    float Angle = atan(Difference.y, Difference.x);
     float U     = (Angle + 3.1415926535) / (6.283185307);
     float V     = (float(gl_InstanceID) + 0.5) / float(uPointLightCount);
 
-    gl_Position = vec4(U * 2.0 - 1.0, V * 2.0 - 1.0, 0.0, 1.0);
+    vDistanceToLight = length(Difference);
+    vLightRadius     = WorkingLight.Radius;
+    gl_Position      = vec4(U * 2.0 - 1.0, V * 2.0 - 1.0, 0.0, 1.0);
 }
 
 #endif
 
 #ifdef FRAGMENT_SHADER
-layout(location = 0)      in vDistanceToLight;
-layout(location = 1)      in vLightRadius;
+layout(location = 0) in float vDistanceToLight;
+layout(location = 1) in float vLightRadius;
 
 void
 main()
