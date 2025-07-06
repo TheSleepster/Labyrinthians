@@ -10,9 +10,8 @@
 
 #define RO_NONE          0x00 
 #define RO_TEXEL_FETCHED 0x01
-#define RO_UNLIT         0x10
-#define RO_OCCLUDER      0x10
-#define RO_NORMAL_MAPPED 0x11
+#define RO_UNLIT         0x02
+#define RO_OCCLUDER      0x04
 
 #ifdef VERTEX_SHADER
 layout(location = 0) in vec4 vPosition;

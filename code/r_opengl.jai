@@ -72,7 +72,7 @@ Rendering_Options :: enum u32
     RO_NONE          :: 0x00;
     RO_TEXEL_FETCHED :: 0x01;
     RO_UNLIT         :: 0x02;
-    RO_OCCLUDER      :: 0x10;
+    RO_OCCLUDER      :: 0x04;
 };
 
 Vertex :: struct
@@ -215,6 +215,7 @@ Render_State :: struct
 
     light_rendering_shader: *GPU_Shader;
     shadow_caster_shader  : *GPU_Shader;
+    compositing_shader    : *GPU_Shader;
 };
 
 // TODO(Sleepster): speed... 
@@ -906,8 +907,10 @@ r_init_renderer_data :: (window: *SDL_Window, asset_manager: *Asset_Manager) -> 
         }
     }
 
-    r_default_render_material         = asset_get_render_material(asset_manager, "Default_Material");
-    render_state.shadow_caster_shader = asset_get_shader(asset_manager, "ex_Shadow_Shader");
+    r_default_render_material           = asset_get_render_material(asset_manager, "Default_Material");
+    render_state.shadow_caster_shader   = asset_get_shader(asset_manager, "ex_Shadow_Shader");
+    render_state.light_rendering_shader = asset_get_shader(asset_manager, "ex_Lightmap_Shader");
+    render_state.compositing_shader     = asset_get_shader(asset_manager, "ex_Composition_Shader");
 
     render_state.update_buffer     = gl_shader_storage_buffer_object_update_buffer;
     render_state.resize_shader_buf = gl_resize_SSBO;
@@ -1093,12 +1096,12 @@ DEBUG_draw_test_sprites_experimental :: (render_state: *Render_State, asset_mana
                                                                                      -1.0,
                                                                                       1.0);
     r_push_render_layer(render_state, 17);
-    r_draw_quad(render_state, .{-300,-160}, .{640, 360}, .{0.01, 0.01, 0.01, 1});
+    r_draw_quad(render_state, .{-300,-160}, .{640, 360}, .{0.4, 0.4, 0.4, 1});
     r_push_render_layer(render_state, 16);
 
 
     r_draw_quad(render_state, .{ 60, -60}, .{8, 96},  .{1, 0, 0, 1}, U32_MAX, .RO_OCCLUDER);
-    r_draw_quad(render_state, .{-60,   0}, .{16, 16}, .{1, 0, 0, 1}, U32_MAX, .RO_OCCLUDER);
+    r_draw_quad(render_state, .{-60,   0}, .{16, 16}, .{1, 0, 0, 1}, U32_MAX, .RO_UNLIT);
 
     sprite  := asset_get_sprite(asset_manager,  "player");
     texture := asset_get_texture(asset_manager, "player");
@@ -1114,7 +1117,7 @@ DEBUG_draw_test_sprites_experimental :: (render_state: *Render_State, asset_mana
         }
     }
 
-    r_create_point_light(render_state, .{0, 0}, .{1.0, 1.0,  1.0, 1.0}, .{1, 1}, deg_to_rad(180), 100, 20.0);
+    r_create_point_light(render_state, .{0,  0}, .{1.0, 1.0,  1.0, 1.0}, .{1, 1}, deg_to_rad(180), 100, 500.0);
 
     default_material := asset_get_render_material(asset_manager, "Default_Material");
     
@@ -1189,13 +1192,15 @@ r_render_group_test_render :: (render_state: *Render_State, asset_manager: *Asse
     }
 }
     
-render_framebuffers : [2]u32;
+render_framebuffers : [4]u32;
 ffb_diffuse_texture :    u32;
 ffb_normals_texture :    u32;
 ffb_position_texture:    u32;
 ffb_depth_texture   :    u32;
 
-sfb_light_map       :    u32;
+sfb_shadow_map      :    u32;
+tfb_light_map       :    u32;
+tfb_composition_tex :    u32;
 
 #no_reset expermiental_init: bool = false;
 r_experimental_DEFERRED_rendering :: (render_state: *Render_State, asset_manager: *Asset_Manager)
@@ -1205,12 +1210,15 @@ r_experimental_DEFERRED_rendering :: (render_state: *Render_State, asset_manager
     
     if !expermiental_init
     {
-        glGenFramebuffers(2, render_framebuffers.data);
+        glGenFramebuffers(4, render_framebuffers.data);
+
         glGenTextures(1, *ffb_diffuse_texture);
         glGenTextures(1, *ffb_normals_texture);
         glGenTextures(1, *ffb_position_texture);
         glGenTextures(1, *ffb_depth_texture);
-        glGenTextures(1, *sfb_light_map);
+        glGenTextures(1, *sfb_shadow_map);
+        glGenTextures(1, *tfb_light_map);
+        glGenTextures(1, *tfb_composition_tex);
 
         // NOTE(Sleepster): DIFFUSE TEXTURE 
         {
@@ -1260,16 +1268,40 @@ r_experimental_DEFERRED_rendering :: (render_state: *Render_State, asset_manager
             glTexImage2D(GL_TEXTURE_2D, 0, GL_DEPTH_COMPONENT24, render_engine_width, render_engine_height, 0, GL_DEPTH_COMPONENT, GL_FLOAT, null);
         }
 
+        // NOTE(Sleepster): SHADOW MAP 
+        {
+            glBindTexture(GL_TEXTURE_2D, sfb_shadow_map);
+            glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_REPEAT);
+            glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_REPEAT);
+
+            glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
+            glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
+
+            glTexImage2D(GL_TEXTURE_2D, 0, GL_DEPTH24_STENCIL8, 128, render_state.draw_frame.light_count, 0, GL_DEPTH_STENCIL, GL_UNSIGNED_INT_24_8, null);
+        }
+
         // NOTE(Sleepster): LIGHT MAP 
         {
-            glBindTexture(GL_TEXTURE_2D, sfb_light_map);
+            glBindTexture(GL_TEXTURE_2D, tfb_light_map);
             glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
             glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
 
             glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
             glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
 
-            glTexImage2D(GL_TEXTURE_2D, 0, GL_DEPTH_COMPONENT24, render_engine_width, render_engine_height, 0, GL_DEPTH_COMPONENT, GL_FLOAT, null);
+            glTexImage2D(GL_TEXTURE_2D, 0, GL_SRGB_ALPHA, render_engine_width, render_engine_height, 0, GL_RGBA, GL_UNSIGNED_BYTE, null);
+        }
+
+        // NOTE(Sleepster): COMPOSITION TEXTURE 
+        {
+            glBindTexture(GL_TEXTURE_2D, tfb_composition_tex);
+            glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+            glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+
+            glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
+            glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
+
+            glTexImage2D(GL_TEXTURE_2D, 0, GL_SRGB_ALPHA, render_engine_width, render_engine_height, 0, GL_RGBA, GL_UNSIGNED_BYTE, null);
         }
 
         // NOTE(Sleepster): FIRST FRAMEBUFFER 
@@ -1287,7 +1319,25 @@ r_experimental_DEFERRED_rendering :: (render_state: *Render_State, asset_manager
         // NOTE(Sleepster): SECOND FRAMEBUFFER
         {
             glBindFramebuffer(GL_FRAMEBUFFER, render_framebuffers[1]);
-            glFramebufferTexture2D(GL_FRAMEBUFFER, GL_DEPTH_ATTACHMENT, GL_TEXTURE_2D, sfb_light_map, 0);
+            glFramebufferTexture2D(GL_FRAMEBUFFER, GL_DEPTH_STENCIL_ATTACHMENT, GL_TEXTURE_2D, sfb_shadow_map, 0);
+        }
+
+        // NOTE(Sleepster): THIRD FRAMEBUFFER 
+        {
+            glBindFramebuffer(GL_FRAMEBUFFER, render_framebuffers[2]);
+            glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, tfb_light_map, 0);
+
+            color_attachments: []GLenum = .[GL_COLOR_ATTACHMENT0];
+            glDrawBuffers(xx color_attachments.count, color_attachments.data);
+        }
+
+        // NOTE(Sleepster): FOURTH FRAMEBUFFER 
+        {
+            glBindFramebuffer(GL_FRAMEBUFFER, render_framebuffers[3]);
+            glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, tfb_composition_tex, 0);
+
+            color_attachments: []GLenum = .[GL_COLOR_ATTACHMENT0];
+            glDrawBuffers(xx color_attachments.count, color_attachments.data);
         }
 
         glBindTexture(GL_TEXTURE_2D, 0);
@@ -1303,8 +1353,10 @@ r_experimental_DEFERRED_rendering :: (render_state: *Render_State, asset_manager
     // NOTE(Sleepster): GBUFFER PASS 
     {
         glEnable(GL_DEPTH_TEST);
+        glDisable(GL_BLEND);
+        glDepthMask(GL_TRUE);
 
-        glViewport(0, 0, 320, 180);
+        glViewport(0, 0, render_engine_width, render_engine_height);
         glClearColor(0.0, 0.0, 0.0, 1.0);
         glClearDepth(0.0);
         glClear(GL_COLOR_BUFFER_BIT|GL_DEPTH_BUFFER_BIT);
@@ -1332,35 +1384,23 @@ r_experimental_DEFERRED_rendering :: (render_state: *Render_State, asset_manager
             {
                 glDepthFunc(GL_GREATER);
                 glDepthMask(GL_TRUE);
-                glDrawElements(GL_TRIANGLES,
-                               opaque_quad_count * 6,
-                               GL_UNSIGNED_INT,
-                               null);
+                glDrawElementsInstanced(GL_TRIANGLES,
+                                        opaque_quad_count * 6,
+                                        GL_UNSIGNED_INT,
+                                        null,
+                                        opaque_quad_count);
             }
             if working_group.t_quad_count > 0
             {
                 glDepthFunc(GL_GEQUAL);
                 glDepthMask(GL_FALSE);
-                glDrawElements(GL_TRIANGLES,
-                               working_group.t_quad_count * 6,
-                               GL_UNSIGNED_INT,
-                               cast(*void)((opaque_quad_count * 6) * size_of(u32)));
+                glDrawElementsInstanced(GL_TRIANGLES,
+                                        working_group.t_quad_count * 6,
+                                        GL_UNSIGNED_INT,
+                                        cast(*void)((opaque_quad_count * 6) * size_of(u32)),
+                                        working_group.t_quad_count);
             }
         }
-
-        glBindFramebuffer(GL_DRAW_FRAMEBUFFER, 0);
-        glBindFramebuffer(GL_READ_FRAMEBUFFER, render_framebuffers[0]);
-
-        glBlitFramebuffer(0,
-                          0,
-                          xx render_engine_width,
-                          xx render_engine_height,
-                          0,
-                          0,
-                          global_window_data.current_window_size.x,
-                          global_window_data.current_window_size.y,
-                          GL_COLOR_BUFFER_BIT,
-                          GL_NEAREST);
 
         glBindFramebuffer(GL_DRAW_FRAMEBUFFER, 0);
         glBindFramebuffer(GL_READ_FRAMEBUFFER, 0);
@@ -1380,15 +1420,29 @@ r_experimental_DEFERRED_rendering :: (render_state: *Render_State, asset_manager
 
             occluder_vertex_count += 4;
         }
+
+        // NOTE(Sleepster): Rebuilding the depth map for shadows 
+        glBindTexture(GL_TEXTURE_2D, sfb_shadow_map);
+        glTexImage2D(GL_TEXTURE_2D, 0, GL_DEPTH24_STENCIL8, 64, render_state.draw_frame.light_count, 0, GL_DEPTH_STENCIL, GL_UNSIGNED_INT_24_8, null);
+        glBindTexture(GL_TEXTURE_2D, 0);
         
         glBindFramebuffer(GL_FRAMEBUFFER, render_framebuffers[1]);
+        glClearDepth(1.0);
+        glClearColor(0.0, 0.0, 0.0, 1.0);
+        glClear(GL_COLOR_BUFFER_BIT|GL_DEPTH_BUFFER_BIT|GL_STENCIL_BUFFER_BIT);
+
+        glEnable(GL_DEPTH_TEST);
+        glDepthFunc(GL_LESS);
+        glDepthMask(GL_TRUE);
+
+        glViewport(0, 0, 64, render_state.draw_frame.light_count);
         glUseProgram(render_state.shadow_caster_shader.program_id);
 
         glBindBuffer(GL_ARRAY_BUFFER, render_state.primary_vbo_id);
         glBufferSubData(GL_ARRAY_BUFFER,
                         0,
                        (occluder_vertex_count * size_of(Vertex)),
-                        render_state.draw_frame.occluder2D_quads.data);
+                        render_state.draw_frame.occluder2D_vertex_buffer.data);
 
         render_state.update_uniform(render_state.shadow_caster_shader,
                                    "uPointLightCount",
@@ -1400,8 +1454,87 @@ r_experimental_DEFERRED_rendering :: (render_state: *Render_State, asset_manager
                                    render_state.draw_frame.shader_point_light_buffer.data);
         
         r_update_shader_data(null, render_state.shadow_caster_shader);
-        glDrawArraysInstanced(GL_TRIANGLES, 0, 6, render_state.draw_frame.light_count);
+        glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, render_state.primary_ebo_id);
+        glDrawElementsInstanced(GL_TRIANGLES,
+                                6 * render_state.draw_frame.occluder2D_count,
+                                GL_UNSIGNED_INT,
+                                null,
+                                render_state.draw_frame.light_count);
     }
+
+    // NOTE(Sleepster): LIGHTING 
+    {
+        glBindFramebuffer(GL_FRAMEBUFFER, render_framebuffers[2]);
+        glClearColor(0.0, 0.0, 0.0, 1.0);
+        glClear(GL_COLOR_BUFFER_BIT);
+
+        glEnable(GL_BLEND);        
+        glBlendEquation(GL_FUNC_ADD);
+        glBlendFunc(GL_ONE, GL_ONE);
+
+        glViewport(0, 0, render_engine_width, render_engine_height);
+        glUseProgram(render_state.light_rendering_shader.program_id);
+        
+        render_state.update_uniform(render_state.light_rendering_shader,
+                                   "uPointLightCount",
+                                   *render_state.draw_frame.light_count);
+
+        render_state.update_buffer(render_state.light_rendering_shader,
+                                   "PointLightSBO",
+                                   size_of(Shader_Light_Data) * render_state.draw_frame.light_count,
+                                   render_state.draw_frame.shader_point_light_buffer.data);
+
+        r_update_shader_data(null, render_state.light_rendering_shader);
+        glActiveTexture(GL_TEXTURE0);
+        glBindTexture(GL_TEXTURE_2D, ffb_position_texture);
+
+        glActiveTexture(GL_TEXTURE1);
+        glBindTexture(GL_TEXTURE_2D, sfb_shadow_map);
+
+        glDrawArrays(GL_TRIANGLES, 0, 6);
+    }
+
+    // NOTE(Sleepster): COMPOSITION 
+    {
+        glBindFramebuffer(GL_FRAMEBUFFER, render_framebuffers[3]);
+
+        glClear(GL_COLOR_BUFFER_BIT);
+        glUseProgram(render_state.compositing_shader.program_id);
+
+        glEnable(GL_BLEND);        
+        glBlendEquation(GL_FUNC_ADD);
+        glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+
+        glActiveTexture(GL_TEXTURE0);
+        glBindTexture(GL_TEXTURE_2D, ffb_diffuse_texture);
+
+        glActiveTexture(GL_TEXTURE1);
+        glBindTexture(GL_TEXTURE_2D, ffb_normals_texture);
+        
+        glActiveTexture(GL_TEXTURE2);
+        glBindTexture(GL_TEXTURE_2D, tfb_light_map);
+
+        glActiveTexture(GL_TEXTURE3);
+        glBindTexture(GL_TEXTURE_2D, ffb_position_texture);
+
+        glDrawArrays(GL_TRIANGLES, 0, 6);
+    }
+
+    glBindFramebuffer(GL_DRAW_FRAMEBUFFER, 0);
+    glBindFramebuffer(GL_READ_FRAMEBUFFER, render_framebuffers[3]);
+
+    glBlitFramebuffer(0,
+                      0,
+                      xx render_engine_width,
+                      xx render_engine_height,
+                      0,
+                      0,
+                      global_window_data.current_window_size.x,
+                      global_window_data.current_window_size.y,
+                      GL_COLOR_BUFFER_BIT,
+                      GL_NEAREST);
+
+    glBindFramebuffer(GL_FRAMEBUFFER, 0);
 }
 
 r_reset_draw_frame :: (render_state: *Render_State)

@@ -81,9 +81,11 @@ am_init :: () -> Asset_Manager
     basic_shader_SSBO_configs[0] = .{"PointLightSBO", MAX_LIGHTS * size_of(Point_Light), false};
 
     // TODO(Sleepster): Maybe if this gets too slow, use a compile tile hash index search.
-    asset_add_shader_to_hash(*result, BASIC_SHADER_SOURCE_TEXT, "Basic_Shader", basic_shader_SSBO_configs, .PIXEL);
-    asset_add_shader_to_hash(*result, EX_GBUFFER_SHADER_TEXT,   "gBuffer_Shader", .[], .PIXEL);
-    asset_add_shader_to_hash(*result, EX_SHADOW_SHADER_TEST,    "ex_Shadow_Shader", basic_shader_SSBO_configs, .PIXEL);
+    asset_add_shader_to_hash(*result, BASIC_SHADER_SOURCE_TEXT,   "Basic_Shader", basic_shader_SSBO_configs, .PIXEL);
+    asset_add_shader_to_hash(*result, EX_GBUFFER_SHADER_TEXT,     "gBuffer_Shader", .[], .PIXEL);
+    asset_add_shader_to_hash(*result, EX_SHADOW_SHADER_TEXT,      "ex_Shadow_Shader",   basic_shader_SSBO_configs, .PIXEL);
+    asset_add_shader_to_hash(*result, EX_LIGHT_MAP_SHADER_TEXT,   "ex_Lightmap_Shader", basic_shader_SSBO_configs, .PIXEL);
+    asset_add_shader_to_hash(*result, EX_COMPOSITION_SHADER_TEXT, "ex_Composition_Shader", .[], .PIXEL);
 
 
     default_material: *Render_Material = c_arena_push_struct(*result.permanent_asset_arena, Render_Material);
