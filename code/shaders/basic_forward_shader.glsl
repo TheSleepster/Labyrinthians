@@ -1,6 +1,7 @@
-#define RO_NONE          0 
+#define RO_NONE          0x00 
 #define RO_TEXEL_FETCHED 0x01
 #define RO_UNLIT         0x02
+#define RO_OCCLUDER      0x04
 struct point_light
 {
     vec4                   Color;
@@ -107,7 +108,7 @@ main()
     vec3  FragPos      = vOutFragPos.xyz;
     vec3  AmbientLight = vec3(uAmbientLighting);
     
-    const float TileSize = 16.0;
+    const float TileSize = 4.0;
     vec3 TotalLighting = vec3(0);
     vec3 Specular      = vec3(0);
     if((vOutRenderingOptions & RO_UNLIT) == 0)

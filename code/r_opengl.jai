@@ -51,8 +51,9 @@ Shader_Light_Data :: struct
 
 Point_Light :: struct
 {
-    light_data : *Shader_Light_Data;
-    ws_position:  Vector2;
+    light_data            : *Shader_Light_Data;
+    ws_position           :  Vector2;
+    light_atlas_cell_index: u32;
 };
 
 /*
@@ -208,14 +209,6 @@ Render_State :: struct
     resize_shader_buf: (shader: *GPU_Shader, buffer_name : string, new_size: s64);
     update_uniform   : (shader: *GPU_Shader, uniform_name: string, data    : *void);
     update_UBO       : (shader: *GPU_Shader, UBO_name    : string, data    : *void);
-
-    //EXPERIMENTAL
-    ex_framebuffer_ID    : u32;
-    ex_color_attachment0 : u32;
-
-    light_rendering_shader: *GPU_Shader;
-    shadow_caster_shader  : *GPU_Shader;
-    compositing_shader    : *GPU_Shader;
 };
 
 // TODO(Sleepster): speed... 
@@ -908,9 +901,6 @@ r_init_renderer_data :: (window: *SDL_Window, asset_manager: *Asset_Manager) -> 
     }
 
     r_default_render_material           = asset_get_render_material(asset_manager, "Default_Material");
-    render_state.shadow_caster_shader   = asset_get_shader(asset_manager, "ex_Shadow_Shader");
-    render_state.light_rendering_shader = asset_get_shader(asset_manager, "ex_Lightmap_Shader");
-    render_state.compositing_shader     = asset_get_shader(asset_manager, "ex_Composition_Shader");
 
     render_state.update_buffer     = gl_shader_storage_buffer_object_update_buffer;
     render_state.resize_shader_buf = gl_resize_SSBO;
@@ -1048,7 +1038,6 @@ DEBUG_draw_test_sprites :: (render_state: *Render_State, asset_manager: *Asset_M
     // }
 
     light  := r_create_point_light(render_state, .{ 500, 100}, .{0.30, 0.30, 0.30, 1.0}, .{ 0, 1},  deg_to_rad(45), 500, 1.0);
-
     default_material := asset_get_render_material(asset_manager, "Default_Material");
     
     // NOTE(Sleepster): This would be done by the game programmer
@@ -1087,7 +1076,7 @@ DEBUG_draw_test_sprites_experimental :: (render_state: *Render_State, asset_mana
     render_state.draw_frame.shader_point_light_buffer = c_arena_push_array(*render_state.draw_frame_arena, Shader_Light_Data, MAX_LIGHTS);
     render_state.draw_frame.engine_point_light_buffer = c_arena_push_array(*render_state.draw_frame_arena, Point_Light, MAX_LIGHTS);
 
-    render_state.draw_frame.active_shader             = asset_get_shader(asset_manager, "gBuffer_Shader");
+    render_state.draw_frame.active_shader             = asset_get_shader(asset_manager, "Basic_Shader");
     render_state.draw_frame.active_view_matrix        = mat4_identity();
     render_state.draw_frame.active_projection_matrix  = orthographic_projection_matrix(320 * -0.5,
                                                                                       320 *  0.5,
@@ -1096,7 +1085,7 @@ DEBUG_draw_test_sprites_experimental :: (render_state: *Render_State, asset_mana
                                                                                      -1.0,
                                                                                       1.0);
     r_push_render_layer(render_state, 17);
-    r_draw_quad(render_state, .{-300,-160}, .{640, 360}, .{0.4, 0.4, 0.4, 1});
+    r_draw_quad(render_state, .{-300,-160}, .{640, 360}, .{0.01, 0.01, 0.01, 1});
     r_push_render_layer(render_state, 16);
 
 
@@ -1117,7 +1106,7 @@ DEBUG_draw_test_sprites_experimental :: (render_state: *Render_State, asset_mana
         }
     }
 
-    r_create_point_light(render_state, .{0,  0}, .{1.0, 1.0,  1.0, 1.0}, .{1, 1}, deg_to_rad(180), 100, 500.0);
+    r_create_point_light(render_state, .{0,  0}, .{1.0, 1.0,  1.0, 1.0}, .{1, 1}, deg_to_rad(180), 100, 2.0);
 
     default_material := asset_get_render_material(asset_manager, "Default_Material");
     
@@ -1129,8 +1118,21 @@ DEBUG_draw_test_sprites_experimental :: (render_state: *Render_State, asset_mana
                                "uProjectionMatrix",
                                *render_state.draw_frame.active_projection_matrix._11);
     render_state.update_uniform(render_state.draw_frame.active_shader,
-                               "uViewMatrix",
-                               *render_state.draw_frame.active_view_matrix._11);
+                              "uViewMatrix",
+                              *render_state.draw_frame.active_view_matrix._11);
+    render_state.update_uniform(render_state.draw_frame.active_shader,
+                              "uPointLightCount",
+                              *render_state.draw_frame.light_count);
+    render_state.update_uniform(render_state.draw_frame.active_shader,
+                               "uAmbientLighting",
+                               *ambient_factor);
+    render_state.update_buffer(render_state.draw_frame.active_shader,
+                              "PointLightSBO",
+                               size_of(Shader_Light_Data) * render_state.draw_frame.light_count,
+                               render_state.draw_frame.shader_point_light_buffer.data);
+    render_state.update_UBO(render_state.draw_frame.active_shader,
+                           "uMaterial",
+                           *default_material);
 }
 
 is_quad_within_light_radius :: inline (light: *Point_Light, working_quad: *Render_Quad) -> bool
@@ -1175,10 +1177,122 @@ r_render_group_test_render :: (render_state: *Render_State, asset_manager: *Asse
         {
             glDepthFunc(GL_GREATER);
             glDepthMask(GL_TRUE);
+            glDrawElementsInstanced(GL_TRIANGLES,
+                                    opaque_quad_count * 6,
+                                    GL_UNSIGNED_INT,
+                                    null,
+                                    opaque_quad_count);
+        }
+        if working_group.t_quad_count > 0
+        {
+            glDepthFunc(GL_GEQUAL);
+            glDepthMask(GL_FALSE);
+            glDrawElementsInstanced(GL_TRIANGLES,
+                                    working_group.t_quad_count * 6,
+                                    GL_UNSIGNED_INT,
+                                    cast(*void)((opaque_quad_count * 6) * size_of(u32)),
+                                    working_group.t_quad_count);
+        }
+    }
+}
+
+framebuffer_id   : u32;
+ffb_rgba_texture : u32;
+ffb_depth_texture: u32;
+
+s_framebuffer_id: u32;
+sfb_lightmap    : u32;
+
+#no_reset experimental_init: bool = false;
+r_experimental_DEFERRED_rendering :: (render_state: *Render_State, asset_manager: *Asset_Manager)
+{
+    render_engine_width : u32 = 320;
+    render_engine_height: u32 = 180;
+
+    if !experimental_init
+    {
+        glGenFramebuffers(1, *framebuffer_id);
+        glBindFramebuffer(GL_FRAMEBUFFER, framebuffer_id);
+
+        glGenTextures(1, *ffb_rgba_texture);
+        glBindTexture(GL_TEXTURE_2D, ffb_rgba_texture);
+
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
+
+
+        glTexImage2D(GL_TEXTURE_2D, 0, GL_SRGB8_ALPHA8, 
+                     render_engine_width, render_engine_height, 0, 
+                     GL_RGBA, GL_UNSIGNED_BYTE, null);
+
+        glGenTextures(1, *ffb_depth_texture);
+        glBindTexture(GL_TEXTURE_2D, ffb_depth_texture);
+
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
+
+
+        glTexImage2D(GL_TEXTURE_2D, 0, GL_DEPTH_COMPONENT24, 
+                     render_engine_width, render_engine_height, 0, 
+                     GL_DEPTH_COMPONENT, GL_UNSIGNED_BYTE, null);
+
+
+        glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, ffb_rgba_texture, 0);
+        glFramebufferTexture2D(GL_FRAMEBUFFER, GL_DEPTH_ATTACHMENT,  GL_TEXTURE_2D, ffb_depth_texture, 0);
+        draw_buffers: []GLenum = .[GL_COLOR_ATTACHMENT0];
+        glDrawBuffers(1, draw_buffers.data);
+
+        experimental_init = true;
+    }
+
+    glClearColor(0.00, 0.00, 0.00, 1.0);
+    glClearDepth(0.0);
+    glClear(GL_COLOR_BUFFER_BIT|GL_DEPTH_BUFFER_BIT);
+
+    glBindFramebuffer(GL_FRAMEBUFFER, framebuffer_id);
+    glViewport(0, 0, render_engine_width, render_engine_height);
+    glClear(GL_COLOR_BUFFER_BIT|GL_DEPTH_BUFFER_BIT);
+
+    glEnable(GL_DEPTH_TEST);
+    glBindVertexArray(render_state.primary_vao_id);
+
+    glEnable(GL_BLEND);        
+    glBlendEquation(GL_FUNC_ADD);
+    glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+
+    // NOTE(Sleepster): Shadow and lighting pass 
+    {
+    }
+
+    // NOTE(Sleepster): Primary Geometry Pass 
+    r_handle_group_buffers(render_state);
+    for group_index: 0..render_state.draw_frame.render_group_counter - 1
+    {
+        working_group := render_state.draw_frame.render_groups[group_index];
+        shader := working_group.bound_shader;
+        glUseProgram(shader.program_id);
+
+        opaque_quad_count := working_group.current_quad_count - working_group.t_quad_count;
+        glBindBuffer(GL_ARRAY_BUFFER, render_state.primary_vbo_id);
+        glBufferSubData(GL_ARRAY_BUFFER,
+                        0,
+                        (working_group.vertex_count * size_of(Vertex)),
+                        working_group.vertex_buffer.data);
+
+        glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, render_state.primary_ebo_id);
+        r_update_shader_data(working_group, shader);
+        if opaque_quad_count > 0
+        {
+            glDepthFunc(GL_GREATER);
+            glDepthMask(GL_TRUE);
             glDrawElements(GL_TRIANGLES,
-                           opaque_quad_count * 6,
-                           GL_UNSIGNED_INT,
-                           null);
+                                    opaque_quad_count * 6,
+                                    GL_UNSIGNED_INT,
+                                    null);
         }
         if working_group.t_quad_count > 0
         {
@@ -1190,351 +1304,19 @@ r_render_group_test_render :: (render_state: *Render_State, asset_manager: *Asse
                            cast(*void)((opaque_quad_count * 6) * size_of(u32)));
         }
     }
-}
-    
-render_framebuffers : [4]u32;
-ffb_diffuse_texture :    u32;
-ffb_normals_texture :    u32;
-ffb_position_texture:    u32;
-ffb_depth_texture   :    u32;
-
-sfb_shadow_map      :    u32;
-tfb_light_map       :    u32;
-tfb_composition_tex :    u32;
-
-#no_reset expermiental_init: bool = false;
-r_experimental_DEFERRED_rendering :: (render_state: *Render_State, asset_manager: *Asset_Manager)
-{
-    render_engine_width : u32 = 320;
-    render_engine_height: u32 = 180;
-    
-    if !expermiental_init
-    {
-        glGenFramebuffers(4, render_framebuffers.data);
-
-        glGenTextures(1, *ffb_diffuse_texture);
-        glGenTextures(1, *ffb_normals_texture);
-        glGenTextures(1, *ffb_position_texture);
-        glGenTextures(1, *ffb_depth_texture);
-        glGenTextures(1, *sfb_shadow_map);
-        glGenTextures(1, *tfb_light_map);
-        glGenTextures(1, *tfb_composition_tex);
-
-        // NOTE(Sleepster): DIFFUSE TEXTURE 
-        {
-            glBindTexture(GL_TEXTURE_2D, ffb_diffuse_texture);
-            glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
-            glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
-
-            glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
-            glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
-
-            glTexImage2D(GL_TEXTURE_2D, 0, GL_SRGB_ALPHA, render_engine_width, render_engine_height, 0, GL_RGBA, GL_UNSIGNED_BYTE, null);
-        }
-
-        // NOTE(Sleepster): NORMAL MAP 
-        {
-            glBindTexture(GL_TEXTURE_2D, ffb_normals_texture);
-            glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
-            glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
-
-            glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
-            glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
-
-            glTexImage2D(GL_TEXTURE_2D, 0, GL_SRGB_ALPHA, render_engine_width, render_engine_height, 0, GL_RGBA, GL_UNSIGNED_BYTE, null);
-        }
-
-        // NOTE(Sleepster): POSITION TEXTURE 
-        {
-            glBindTexture(GL_TEXTURE_2D, ffb_position_texture);
-            glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
-            glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
-
-            glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
-            glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
-
-            glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA32F, render_engine_width, render_engine_height, 0, GL_RGBA, GL_FLOAT, null);
-        }
-
-        // NOTE(Sleepster): DEPTH TEXTURE
-        {
-            glBindTexture(GL_TEXTURE_2D, ffb_depth_texture);
-            glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_BORDER);
-            glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_BORDER);
-
-            glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
-            glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
-
-            glTexImage2D(GL_TEXTURE_2D, 0, GL_DEPTH_COMPONENT24, render_engine_width, render_engine_height, 0, GL_DEPTH_COMPONENT, GL_FLOAT, null);
-        }
-
-        // NOTE(Sleepster): SHADOW MAP 
-        {
-            glBindTexture(GL_TEXTURE_2D, sfb_shadow_map);
-            glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_REPEAT);
-            glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_REPEAT);
-
-            glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
-            glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
-
-            glTexImage2D(GL_TEXTURE_2D, 0, GL_DEPTH24_STENCIL8, 128, render_state.draw_frame.light_count, 0, GL_DEPTH_STENCIL, GL_UNSIGNED_INT_24_8, null);
-        }
-
-        // NOTE(Sleepster): LIGHT MAP 
-        {
-            glBindTexture(GL_TEXTURE_2D, tfb_light_map);
-            glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
-            glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
-
-            glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
-            glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
-
-            glTexImage2D(GL_TEXTURE_2D, 0, GL_SRGB_ALPHA, render_engine_width, render_engine_height, 0, GL_RGBA, GL_UNSIGNED_BYTE, null);
-        }
-
-        // NOTE(Sleepster): COMPOSITION TEXTURE 
-        {
-            glBindTexture(GL_TEXTURE_2D, tfb_composition_tex);
-            glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
-            glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
-
-            glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
-            glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
-
-            glTexImage2D(GL_TEXTURE_2D, 0, GL_SRGB_ALPHA, render_engine_width, render_engine_height, 0, GL_RGBA, GL_UNSIGNED_BYTE, null);
-        }
-
-        // NOTE(Sleepster): FIRST FRAMEBUFFER 
-        {
-            glBindFramebuffer(GL_FRAMEBUFFER, render_framebuffers[0]);
-            glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, ffb_diffuse_texture,  0);
-            glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT1, GL_TEXTURE_2D, ffb_normals_texture,  0);
-            glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT2, GL_TEXTURE_2D, ffb_position_texture, 0);
-            glFramebufferTexture2D(GL_FRAMEBUFFER, GL_DEPTH_ATTACHMENT,  GL_TEXTURE_2D, ffb_depth_texture,    0);
-
-            color_attachments: []GLenum = .[GL_COLOR_ATTACHMENT0, GL_COLOR_ATTACHMENT1, GL_COLOR_ATTACHMENT2];
-            glDrawBuffers(xx color_attachments.count, color_attachments.data);
-        }
-
-        // NOTE(Sleepster): SECOND FRAMEBUFFER
-        {
-            glBindFramebuffer(GL_FRAMEBUFFER, render_framebuffers[1]);
-            glFramebufferTexture2D(GL_FRAMEBUFFER, GL_DEPTH_STENCIL_ATTACHMENT, GL_TEXTURE_2D, sfb_shadow_map, 0);
-        }
-
-        // NOTE(Sleepster): THIRD FRAMEBUFFER 
-        {
-            glBindFramebuffer(GL_FRAMEBUFFER, render_framebuffers[2]);
-            glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, tfb_light_map, 0);
-
-            color_attachments: []GLenum = .[GL_COLOR_ATTACHMENT0];
-            glDrawBuffers(xx color_attachments.count, color_attachments.data);
-        }
-
-        // NOTE(Sleepster): FOURTH FRAMEBUFFER 
-        {
-            glBindFramebuffer(GL_FRAMEBUFFER, render_framebuffers[3]);
-            glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, tfb_composition_tex, 0);
-
-            color_attachments: []GLenum = .[GL_COLOR_ATTACHMENT0];
-            glDrawBuffers(xx color_attachments.count, color_attachments.data);
-        }
-
-        glBindTexture(GL_TEXTURE_2D, 0);
-        glBindFramebuffer(GL_FRAMEBUFFER, 0);
-
-        expermiental_init = true;
-    }
-
-    glEnable(GL_DEPTH_TEST);
-    glClear(GL_COLOR_BUFFER_BIT|GL_DEPTH_BUFFER_BIT);
-    glBindFramebuffer(GL_FRAMEBUFFER, render_framebuffers[0]);
-
-    // NOTE(Sleepster): GBUFFER PASS 
-    {
-        glEnable(GL_DEPTH_TEST);
-        glDisable(GL_BLEND);
-        glDepthMask(GL_TRUE);
-
-        glViewport(0, 0, render_engine_width, render_engine_height);
-        glClearColor(0.0, 0.0, 0.0, 1.0);
-        glClearDepth(0.0);
-        glClear(GL_COLOR_BUFFER_BIT|GL_DEPTH_BUFFER_BIT);
-
-        glBindVertexArray(render_state.primary_vao_id);
-
-        shader := asset_get_shader(asset_manager, "gBuffer_Shader");
-        glUseProgram(shader.program_id);
-
-        r_handle_group_buffers(render_state);
-        for group_index: 0..render_state.draw_frame.render_group_counter - 1
-        {
-            working_group := render_state.draw_frame.render_groups[group_index];
-
-            opaque_quad_count := working_group.current_quad_count - working_group.t_quad_count;
-            glBindBuffer(GL_ARRAY_BUFFER, render_state.primary_vbo_id);
-            glBufferSubData(GL_ARRAY_BUFFER,
-                            0,
-                            (working_group.vertex_count * size_of(Vertex)),
-                            working_group.vertex_buffer.data);
-
-            glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, render_state.primary_ebo_id);
-            r_update_shader_data(working_group, shader);
-            if opaque_quad_count > 0
-            {
-                glDepthFunc(GL_GREATER);
-                glDepthMask(GL_TRUE);
-                glDrawElementsInstanced(GL_TRIANGLES,
-                                        opaque_quad_count * 6,
-                                        GL_UNSIGNED_INT,
-                                        null,
-                                        opaque_quad_count);
-            }
-            if working_group.t_quad_count > 0
-            {
-                glDepthFunc(GL_GEQUAL);
-                glDepthMask(GL_FALSE);
-                glDrawElementsInstanced(GL_TRIANGLES,
-                                        working_group.t_quad_count * 6,
-                                        GL_UNSIGNED_INT,
-                                        cast(*void)((opaque_quad_count * 6) * size_of(u32)),
-                                        working_group.t_quad_count);
-            }
-        }
-
-        glBindFramebuffer(GL_DRAW_FRAMEBUFFER, 0);
-        glBindFramebuffer(GL_READ_FRAMEBUFFER, 0);
-    }
-
-    // NOTE(Sleepster): SHADOWS 
-    {
-        occluder_vertex_count: u32 = 0;
-        for occluder_index: 0..render_state.draw_frame.occluder2D_count
-        {
-            occluder := *render_state.draw_frame.occluder2D_quads[occluder_index];
-
-            render_state.draw_frame.occluder2D_vertex_buffer[occluder_vertex_count + 0] = occluder.bottom_left;
-            render_state.draw_frame.occluder2D_vertex_buffer[occluder_vertex_count + 1] = occluder.top_left;
-            render_state.draw_frame.occluder2D_vertex_buffer[occluder_vertex_count + 2] = occluder.top_right;
-            render_state.draw_frame.occluder2D_vertex_buffer[occluder_vertex_count + 3] = occluder.bottom_right;
-
-            occluder_vertex_count += 4;
-        }
-
-        // NOTE(Sleepster): Rebuilding the depth map for shadows 
-        glBindTexture(GL_TEXTURE_2D, sfb_shadow_map);
-        glTexImage2D(GL_TEXTURE_2D, 0, GL_DEPTH24_STENCIL8, 64, render_state.draw_frame.light_count, 0, GL_DEPTH_STENCIL, GL_UNSIGNED_INT_24_8, null);
-        glBindTexture(GL_TEXTURE_2D, 0);
-        
-        glBindFramebuffer(GL_FRAMEBUFFER, render_framebuffers[1]);
-        glClearDepth(1.0);
-        glClearColor(0.0, 0.0, 0.0, 1.0);
-        glClear(GL_COLOR_BUFFER_BIT|GL_DEPTH_BUFFER_BIT|GL_STENCIL_BUFFER_BIT);
-
-        glEnable(GL_DEPTH_TEST);
-        glDepthFunc(GL_LESS);
-        glDepthMask(GL_TRUE);
-
-        glViewport(0, 0, 64, render_state.draw_frame.light_count);
-        glUseProgram(render_state.shadow_caster_shader.program_id);
-
-        glBindBuffer(GL_ARRAY_BUFFER, render_state.primary_vbo_id);
-        glBufferSubData(GL_ARRAY_BUFFER,
-                        0,
-                       (occluder_vertex_count * size_of(Vertex)),
-                        render_state.draw_frame.occluder2D_vertex_buffer.data);
-
-        render_state.update_uniform(render_state.shadow_caster_shader,
-                                   "uPointLightCount",
-                                   *render_state.draw_frame.light_count);
-
-        render_state.update_buffer(render_state.shadow_caster_shader,
-                                   "PointLightSBO",
-                                   size_of(Shader_Light_Data) * render_state.draw_frame.light_count,
-                                   render_state.draw_frame.shader_point_light_buffer.data);
-        
-        r_update_shader_data(null, render_state.shadow_caster_shader);
-        glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, render_state.primary_ebo_id);
-        glDrawElementsInstanced(GL_TRIANGLES,
-                                6 * render_state.draw_frame.occluder2D_count,
-                                GL_UNSIGNED_INT,
-                                null,
-                                render_state.draw_frame.light_count);
-    }
-
-    // NOTE(Sleepster): LIGHTING 
-    {
-        glBindFramebuffer(GL_FRAMEBUFFER, render_framebuffers[2]);
-        glClearColor(0.0, 0.0, 0.0, 1.0);
-        glClear(GL_COLOR_BUFFER_BIT);
-
-        glEnable(GL_BLEND);        
-        glBlendEquation(GL_FUNC_ADD);
-        glBlendFunc(GL_ONE, GL_ONE);
-
-        glViewport(0, 0, render_engine_width, render_engine_height);
-        glUseProgram(render_state.light_rendering_shader.program_id);
-        
-        render_state.update_uniform(render_state.light_rendering_shader,
-                                   "uPointLightCount",
-                                   *render_state.draw_frame.light_count);
-
-        render_state.update_buffer(render_state.light_rendering_shader,
-                                   "PointLightSBO",
-                                   size_of(Shader_Light_Data) * render_state.draw_frame.light_count,
-                                   render_state.draw_frame.shader_point_light_buffer.data);
-
-        r_update_shader_data(null, render_state.light_rendering_shader);
-        glActiveTexture(GL_TEXTURE0);
-        glBindTexture(GL_TEXTURE_2D, ffb_position_texture);
-
-        glActiveTexture(GL_TEXTURE1);
-        glBindTexture(GL_TEXTURE_2D, sfb_shadow_map);
-
-        glDrawArrays(GL_TRIANGLES, 0, 6);
-    }
-
-    // NOTE(Sleepster): COMPOSITION 
-    {
-        glBindFramebuffer(GL_FRAMEBUFFER, render_framebuffers[3]);
-
-        glClear(GL_COLOR_BUFFER_BIT);
-        glUseProgram(render_state.compositing_shader.program_id);
-
-        glEnable(GL_BLEND);        
-        glBlendEquation(GL_FUNC_ADD);
-        glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
-
-        glActiveTexture(GL_TEXTURE0);
-        glBindTexture(GL_TEXTURE_2D, ffb_diffuse_texture);
-
-        glActiveTexture(GL_TEXTURE1);
-        glBindTexture(GL_TEXTURE_2D, ffb_normals_texture);
-        
-        glActiveTexture(GL_TEXTURE2);
-        glBindTexture(GL_TEXTURE_2D, tfb_light_map);
-
-        glActiveTexture(GL_TEXTURE3);
-        glBindTexture(GL_TEXTURE_2D, ffb_position_texture);
-
-        glDrawArrays(GL_TRIANGLES, 0, 6);
-    }
 
     glBindFramebuffer(GL_DRAW_FRAMEBUFFER, 0);
-    glBindFramebuffer(GL_READ_FRAMEBUFFER, render_framebuffers[3]);
-
+    glBindFramebuffer(GL_READ_FRAMEBUFFER, framebuffer_id);
     glBlitFramebuffer(0,
                       0,
-                      xx render_engine_width,
-                      xx render_engine_height,
+                   xx render_engine_width,
+                   xx render_engine_height,
                       0,
                       0,
-                      global_window_data.current_window_size.x,
-                      global_window_data.current_window_size.y,
+                   xx global_window_data.current_window_size.x,
+                   xx global_window_data.current_window_size.y,
                       GL_COLOR_BUFFER_BIT,
                       GL_NEAREST);
-
-    glBindFramebuffer(GL_FRAMEBUFFER, 0);
 }
 
 r_reset_draw_frame :: (render_state: *Render_State)
