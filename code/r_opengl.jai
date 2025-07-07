@@ -24,11 +24,14 @@ MAX_TRIANGLES               :: #run {cast(s64)(floor(MAX_GROUP_VERTICES / 3));}
 
 MAX_TEXTURE_SLOTS           :: 16;
 MAX_RENDER_PASSES           :: 32;
-MAX_LIGHTS                  :: 2048;
 MAX_LIGHTS_PER_TILE_CLUSTER :: 64;
 ENGINE_TEXTURE_SIZE         :: 2048;
 
-MAX_OCCLUDERS               :: 1024;
+MAX_LIGHTS                  :: 256;
+MAX_OCCLUDERS               :: 2000;
+
+MAX_LIGHT_RADIUS            :: 256;
+LIGHTMAP_SIZE               :: 2048;
 
 r_default_render_material: *Render_Material;
 
@@ -51,9 +54,10 @@ Shader_Light_Data :: struct
 
 Point_Light :: struct
 {
-    light_data            : *Shader_Light_Data;
-    ws_position           :  Vector2;
-    light_atlas_cell_index: u32;
+    light_data               : *Shader_Light_Data;
+    ws_position              :  Vector2;
+    light_atlas_cell_index   :  u32;
+    light_atlas_channel_index:  u32;
 };
 
 /*
@@ -184,14 +188,16 @@ Draw_Frame :: struct
     render_groups             : []*Render_Group;
     render_group_counter      :   u32;
 
-    occluder2D_quads          : []Render_Quad;
-    occluder2D_vertex_buffer  : []Vertex;
-    occluder2D_count          :   u32;
-    
     // NOTE(Sleepster): Linked Lists 
     quad_buffers              :   Render_Group_Quad_Buffer;
     triangle_buffers          :   Render_Group_Triangle_Buffer;
     line_buffers              :   Render_Group_Line_Buffer;
+
+    light_atlas_channel_index :   u32;
+    light_atlas_cell_index    :   u32;
+
+    lightmap_quad_count       :   u32;
+    occluder2D_count          :   u32;
 };
 
 Render_State :: struct
@@ -201,9 +207,15 @@ Render_State :: struct
     primary_ebo_id                 : u32;
 
     render_data_arena              : Memory_Arena;
-
     draw_frame_arena               : Memory_Arena;
+
     draw_frame                     : Draw_Frame;
+
+    occluder2D_vertex_buffer       : []Vertex;
+    occluder2D_quad_buffer         : []Occluder2D;
+
+    lightmap_vertex_buffer         : []Vertex;
+    lightmap_quad_buffer           : []Render_Quad;
 
     update_buffer    : (shader: *GPU_Shader, buffer_name : string, size    : s64, data: *void);
     resize_shader_buf: (shader: *GPU_Shader, buffer_name : string, new_size: s64);
@@ -900,7 +912,13 @@ r_init_renderer_data :: (window: *SDL_Window, asset_manager: *Asset_Manager) -> 
         }
     }
 
-    r_default_render_material           = asset_get_render_material(asset_manager, "Default_Material");
+    r_default_render_material = asset_get_render_material(asset_manager, "Default_Material");
+
+    render_state.occluder2D_quad_buffer   = c_arena_push_array(*render_state.render_data_arena, Occluder2D, MAX_OCCLUDERS);
+    render_state.occluder2D_vertex_buffer = c_arena_push_array(*render_state.render_data_arena, Vertex,     MAX_OCCLUDERS * 4);
+
+    render_state.lightmap_quad_buffer     = c_arena_push_array(*render_state.render_data_arena, Render_Quad, MAX_LIGHTS);
+    render_state.lightmap_vertex_buffer   = c_arena_push_array(*render_state.render_data_arena, Vertex,      MAX_LIGHTS * 4);
 
     render_state.update_buffer     = gl_shader_storage_buffer_object_update_buffer;
     render_state.resize_shader_buf = gl_resize_SSBO;
@@ -1088,7 +1106,6 @@ DEBUG_draw_test_sprites_experimental :: (render_state: *Render_State, asset_mana
     r_draw_quad(render_state, .{-300,-160}, .{640, 360}, .{0.01, 0.01, 0.01, 1});
     r_push_render_layer(render_state, 16);
 
-
     r_draw_quad(render_state, .{ 60, -60}, .{8, 96},  .{1, 0, 0, 1}, U32_MAX, .RO_OCCLUDER);
     r_draw_quad(render_state, .{-60,   0}, .{16, 16}, .{1, 0, 0, 1}, U32_MAX, .RO_UNLIT);
 
@@ -1264,6 +1281,7 @@ r_experimental_DEFERRED_rendering :: (render_state: *Render_State, asset_manager
     glBlendEquation(GL_FUNC_ADD);
     glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
 
+    r_handle_lighting_data(render_state);
     // NOTE(Sleepster): Shadow and lighting pass 
     {
     }

@@ -67,6 +67,13 @@ Render_Quad :: struct
     };
 };
 
+Occluder2D :: struct
+{
+    using quad_data: Render_Quad;
+    light_atlas_cell_index   : u32;
+    light_atlas_channel_index: u32;
+};
+
 r_create_draw_quad :: (render_state  : *Render_State,
                        quad_buffer   : *Render_Group_Quad_Buffer,
                        position      :  Vector2,
@@ -228,15 +235,8 @@ r_create_draw_quad :: (render_state  : *Render_State,
 
     if ((quad.render_options & .RO_OCCLUDER) != 0) && !culled
     {
-        using render_state;
-        if draw_frame.occluder2D_quads.data == null
-        {
-            draw_frame.occluder2D_quads         = c_arena_push_array(*draw_frame_arena, Render_Quad, MAX_OCCLUDERS);
-            draw_frame.occluder2D_vertex_buffer = c_arena_push_array(*draw_frame_arena, Vertex,      MAX_OCCLUDERS * 4);
-        }
-
-        draw_frame.occluder2D_quads[draw_frame.occluder2D_count] = quad;
-        draw_frame.occluder2D_count += 1;
+        render_state.occluder2D_quad_buffer[render_state.draw_frame.occluder2D_count].quad_data = quad;
+        render_state.draw_frame.occluder2D_count += 1;
     }
 
     return culled, quad;
@@ -322,9 +322,19 @@ r_create_point_light :: (render_state: *Render_State,
         log("[INFO]: Light Culled...\n");
         return null;
     }
+    light_data_pos := mat4_transform(render_state.draw_frame.active_view_matrix, v2_expand(position, 0, 1));
 
-    light_data_pos        := mat4_transform(render_state.draw_frame.active_view_matrix, v2_expand(position, 0, 1));
-    engine_light.ws_position = position;
+    engine_light.ws_position               = position;
+    engine_light.light_atlas_channel_index = render_state.draw_frame.light_atlas_channel_index;
+    engine_light.light_atlas_cell_index    = render_state.draw_frame.light_atlas_cell_index;
+
+    render_state.draw_frame.light_atlas_channel_index += 1;
+    if render_state.draw_frame.light_atlas_channel_index > 3
+    {
+        render_state.draw_frame.light_atlas_channel_index = 0;
+        render_state.draw_frame.light_atlas_cell_index   += 1;
+    }
+
     light_data.vs_position   = light_data_pos.xy;
     light_data.cs_position   = NDC_position.xy;
 
@@ -441,4 +451,48 @@ r_set_render_matrices :: inline (render_state: *Render_State, view_matrix: Matri
 {
     render_state.draw_frame.active_view_matrix       = view_matrix;
     render_state.draw_frame.active_projection_matrix = projection_matrix;
+}
+
+r_handle_lighting_data :: (render_state: *Render_State)
+{
+/*
+    What do we want this function to do?
+LIGHTING:
+       - Compute the correct UVs into the light atlas for all the lights in the current scene
+           - Convert a light_atlas_cell_index -> UV coords
+       - Assign a vector4 light mask for the channel the light occupies
+           - Channel index 0 = .{1, 0, 0, 0}. Channel index 1 = .{0, 1, 0, 0}...
+       - Create clip space geometry to store the lighting information in the atlas
+           - Create a quad that is made in world space coordinates, bring them to clip space
+       - Add this quad to the light quads vertex buffer 
+SHADOWS: 
+       - For each light, loop over each occluder to figure out if it is within the influence of the light
+            - If the occluder IS within range, set it's cell_index and it's channel_index to that of the light's
+            - If the occluder ISN'T then skip it
+       - For each occluder generate a shadow quad and bring it's transformation space to that of clip space. 
+       - Add the quad to the occluder shadow quads vertex buffer.
+*/
+    draw_frame := *render_state.draw_frame;
+    for light_index: 0..render_state.draw_frame.light_count - 1
+    {
+        working_light := *draw_frame.engine_point_light_buffer[light_index];
+        for occluder_index: 0..draw_frame.occluder2D_count - 1
+        {
+            occluder := *render_state.occluder2D_quad_buffer[occluder_index];
+            if is_quad_within_light_radius(working_light, *occluder.quad_data)
+            {
+                occluder.light_atlas_cell_index    = working_light.light_atlas_cell_index;
+                occluder.light_atlas_channel_index = working_light.light_atlas_channel_index;
+            }
+        }
+
+        cell_x: s32 = working_light.light_atlas_cell_index % (LIGHTMAP_SIZE / MAX_LIGHT_RADIUS);
+        cell_y: s32 = working_light.light_atlas_cell_index / (LIGHTMAP_SIZE / MAX_LIGHT_RADIUS);
+
+        U := (cell_x * MAX_LIGHT_RADIUS) / LIGHTMAP_SIZE;
+        V := (cell_y * MAX_LIGHT_RADIUS) / LIGHTMAP_SIZE;
+        
+        light_mask: Vector4 = .{0.0, 0.0, 0.0, 0.0};
+        light_mask.component[working_light.light_atlas_channel_index] = 1.0;
+    }
 }
