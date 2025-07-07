@@ -471,6 +471,15 @@ SHADOWS:
             - If the occluder ISN'T then skip it
        - For each occluder generate a shadow quad and bring it's transformation space to that of clip space. 
        - Add the quad to the occluder shadow quads vertex buffer.
+DRAWING:
+       - Render the light mask (occluder) geometry into the light map,
+         using the cell_index (which converts to UV coords in the
+         bigger lightmap) and color_mask to render it correctly the
+         glColorMask() is set to to only write alpha.
+
+       - Render all lights using their lightmap geometry into the
+         light map, again using the cell_index and color mask to
+         ensure proper writing.
 */
     draw_frame := *render_state.draw_frame;
     for light_index: 0..render_state.draw_frame.light_count - 1
