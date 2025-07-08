@@ -72,6 +72,7 @@ Occluder2D :: struct
     using quad_data: Render_Quad;
     light_atlas_cell_index   : u32;
     light_atlas_channel_index: u32;
+    influenced_light_index   : s32 = -1;
 };
 
 r_create_draw_quad :: (render_state  : *Render_State,
@@ -307,9 +308,11 @@ r_create_point_light :: (render_state: *Render_State,
                          strength    :  float32 = 1.0) -> *Point_Light
 {
     assert(render_state.draw_frame.light_count + 1 < MAX_LIGHTS);
+    assert(render_state.shader_point_light_buffer.data != null);
+    assert(render_state.engine_point_light_buffer.data != null);
     
-    light_data   := *render_state.draw_frame.shader_point_light_buffer[render_state.draw_frame.light_count];
-    engine_light := *render_state.draw_frame.engine_point_light_buffer[render_state.draw_frame.light_count];
+    light_data   := *render_state.shader_point_light_buffer[render_state.draw_frame.light_count];
+    engine_light := *render_state.engine_point_light_buffer[render_state.draw_frame.light_count];
 
     engine_light.light_data = light_data;
     light_data.light_color  = light_color;
@@ -484,7 +487,7 @@ DRAWING:
     draw_frame := *render_state.draw_frame;
     for light_index: 0..render_state.draw_frame.light_count - 1
     {
-        working_light := *draw_frame.engine_point_light_buffer[light_index];
+        working_light := *render_state.engine_point_light_buffer[light_index];
         for occluder_index: 0..draw_frame.occluder2D_count - 1
         {
             occluder := *render_state.occluder2D_quad_buffer[occluder_index];
@@ -492,16 +495,124 @@ DRAWING:
             {
                 occluder.light_atlas_cell_index    = working_light.light_atlas_cell_index;
                 occluder.light_atlas_channel_index = working_light.light_atlas_channel_index;
+                occluder.influenced_light_index    = cast(s32)light_index;
             }
         }
 
-        cell_x: s32 = working_light.light_atlas_cell_index % (LIGHTMAP_SIZE / MAX_LIGHT_RADIUS);
-        cell_y: s32 = working_light.light_atlas_cell_index / (LIGHTMAP_SIZE / MAX_LIGHT_RADIUS);
+        // NOTE(Sleepster): Compute light atlas data
+        cell_x: u32 = working_light.light_atlas_cell_index % (LIGHTMAP_SIZE / MAX_LIGHT_RADIUS);
+        cell_y: u32 = working_light.light_atlas_cell_index / (LIGHTMAP_SIZE / MAX_LIGHT_RADIUS);
 
-        U := (cell_x * MAX_LIGHT_RADIUS) / LIGHTMAP_SIZE;
-        V := (cell_y * MAX_LIGHT_RADIUS) / LIGHTMAP_SIZE;
+        cell_U: float32 = (cast(float32)cell_x * cast(float32)MAX_LIGHT_RADIUS) / LIGHTMAP_SIZE;
+        cell_V: float32 = (cast(float32)cell_y * cast(float32)MAX_LIGHT_RADIUS) / LIGHTMAP_SIZE;
+
+        light_cell_scale: float32 = cast(float32)(MAX_LIGHT_RADIUS / LIGHTMAP_SIZE);
         
         light_mask: Vector4 = .{0.0, 0.0, 0.0, 0.0};
         light_mask.component[working_light.light_atlas_channel_index] = 1.0;
+
+        // NOTE(Sleepster): build the vertices 
+        {
+            bottom_left_vertex  := *render_state.lightmap_vertex_buffer[render_state.draw_frame.lightmap_vertex_count + 0];
+            top_left_vertex     := *render_state.lightmap_vertex_buffer[render_state.draw_frame.lightmap_vertex_count + 1];
+            top_right_vertex    := *render_state.lightmap_vertex_buffer[render_state.draw_frame.lightmap_vertex_count + 2];
+            bottom_right_vertex := *render_state.lightmap_vertex_buffer[render_state.draw_frame.lightmap_vertex_count + 3];
+
+            // NOTE(Sleepster): World Space Position Data 
+            {
+                top    := working_light.ws_position.y;
+                left   := working_light.ws_position.x - working_light.light_data.radius;
+                right  := working_light.ws_position.x + working_light.light_data.radius;
+                bottom := working_light.ws_position.y + working_light.light_data.radius;
+
+                top_left_vertex.vPosition     = v2_expand(.{left,   top}, 0, 1,);
+                top_right_vertex.vPosition    = v2_expand(.{right,  top}, 0, 1,);
+                bottom_left_vertex.vPosition  = v2_expand(.{right,  bottom}, 0, 1,);
+                bottom_right_vertex.vPosition = v2_expand(.{left,   bottom}, 0, 1,);
+            }
+
+            // NOTE(Sleepster): Lightmap atlas UVs
+            {
+                top_uv    := cell_V;
+                left_uv   := cell_U;
+                right_uv  := cell_U + light_cell_scale;
+                bottom_uv := cell_V + light_cell_scale;
+
+                top_left_vertex.vTexelData     = .{left_uv,  top_uv};
+                top_right_vertex.vTexelData    = .{right_uv, top_uv};
+                bottom_left_vertex.vTexelData  = .{left_uv,  bottom_uv};
+                bottom_right_vertex.vTexelData = .{right_uv, bottom_uv};
+            }
+
+            // NOTE(Sleepster): Light Mask 
+            top_left_vertex.vColor     = light_mask;
+            top_right_vertex.vColor    = light_mask;
+            bottom_left_vertex.vColor  = light_mask;
+            bottom_right_vertex.vColor = light_mask;
+        }
+
+        render_state.draw_frame.lightmap_vertex_count += 4;
+    }
+
+    for occluder_index: 0..render_state.draw_frame.occluder2D_count - 1
+    {
+        occluder := *render_state.occluder2D_quad_buffer[occluder_index];
+        if occluder.influenced_light_index != -1
+        {
+            light := *render_state.engine_point_light_buffer[occluder.influenced_light_index];
+            assert(light != null);
+
+            // generate the shadow quad relative to the light and add it to the vertex buffer
+            for vertex_index: 0..4 - 1
+            {
+                edge0: Vector2 = occluder.elements[vertex_index].vPosition.xy;
+                edge1: Vector2 = occluder.elements[(vertex_index + 1) % 4].vPosition.xy;
+
+                edge0_light_vector: Vector2 = edge0 - light.ws_position;
+                edge1_light_vector: Vector2 = edge1 - light.ws_position;
+
+                projection_factor: float32 = 1000;
+                edge0_prime := edge0 + edge0_light_vector * projection_factor;
+                edge1_prime := edge1 + edge1_light_vector * projection_factor;
+
+                occluder.elements[0].vPosition = v2_expand(edge0,       0, 1);
+                occluder.elements[1].vPosition = v2_expand(edge1,       0, 1);
+                occluder.elements[2].vPosition = v2_expand(edge0_prime, 0, 1);
+                occluder.elements[3].vPosition = v2_expand(edge1_prime, 0, 1);
+            }
+
+            cell_x: u32 = light.light_atlas_cell_index % (LIGHTMAP_SIZE / MAX_LIGHT_RADIUS);
+            cell_y: u32 = light.light_atlas_cell_index / (LIGHTMAP_SIZE / MAX_LIGHT_RADIUS);
+
+            cell_U : float32 = (cast(float32)cell_x * cast(float32)MAX_LIGHT_RADIUS) / LIGHTMAP_SIZE;
+            cell_V : float32 = (cast(float32)cell_y * cast(float32)MAX_LIGHT_RADIUS) / LIGHTMAP_SIZE;
+
+            light_cell_scale: float32 = cast(float32)(MAX_LIGHT_RADIUS / LIGHTMAP_SIZE);
+
+            light_mask: Vector4 = .{0.0, 0.0, 0.0, 0.0};
+            light_mask.component[light.light_atlas_channel_index] = 1.0;
+            
+            occluder.top_left.vTexelData     = .{cell_U,                    cell_V};
+            occluder.top_right.vTexelData    = .{cell_U + light_cell_scale, cell_V};
+            occluder.bottom_left.vTexelData  = .{cell_U,                    cell_V + light_cell_scale};
+            occluder.bottom_right.vTexelData = .{cell_U + light_cell_scale, cell_V + light_cell_scale};
+            
+            for *element: occluder.quad_data.elements
+            {
+                element.vColor = light_mask;
+            }
+
+            bottom_left_vertex  := *render_state.occluder2D_vertex_buffer[render_state.draw_frame.occluder_vertex_count + 0];
+            top_left_vertex     := *render_state.occluder2D_vertex_buffer[render_state.draw_frame.occluder_vertex_count + 1];
+            top_right_vertex    := *render_state.occluder2D_vertex_buffer[render_state.draw_frame.occluder_vertex_count + 2];
+            bottom_right_vertex := *render_state.occluder2D_vertex_buffer[render_state.draw_frame.occluder_vertex_count + 3];
+
+            top_left_vertex.*     = occluder.top_left;
+            top_right_vertex.*    = occluder.top_right;
+            bottom_left_vertex.*  = occluder.bottom_left;
+            bottom_right_vertex.* = occluder.bottom_right;
+
+            render_state.draw_frame.occluder_vertex_count += 4;
+        }
     }
 }
