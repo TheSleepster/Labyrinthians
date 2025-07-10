@@ -11,3 +11,8 @@ c_SHADOWMAP_SHADER_TEXT :: #run -> string
 {
     return read_entire_file("shaders/c_shadowmap_shader.glsl");
 }
+
+c_LIGHTMAP_SHADER_TEXT :: #run -> string
+{
+    return read_entire_file("shaders/c_lightmap_shader.glsl");
+}

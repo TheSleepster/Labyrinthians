@@ -584,7 +584,32 @@ DRAWING:
             // generate the shadow quad relative to the light and add it to the vertex buffer
             for vertex_index: 0..4 - 1
             {
-            }
+                edge0: Vector2 = occluder.elements[vertex_index].vPosition.xy;
+                edge1: Vector2 = occluder.elements[(vertex_index + 1) % 4].vPosition.xy;
+
+                edge0_light_direction_vector: Vector2 = normalize(edge0 - light.ws_position);
+                edge1_light_direction_vector: Vector2 = normalize(edge1 - light.ws_position);
+
+                projection: float32 = light.light_data.radius * 2.0;
+                edge0_prime := edge0 + (edge0_light_direction_vector * projection);
+                edge1_prime := edge1 + (edge1_light_direction_vector * projection); 
+
+                // TODO(Sleepster): this doesn't have to be a full copy 
+                new_occluder: Occluder2D;
+                new_occluder = occluder.*;
+
+                new_occluder.elements[0].vPosition = v2_expand(edge0, 0, 1);
+                new_occluder.elements[1].vPosition = v2_expand(edge1, 0, 1);
+                new_occluder.elements[2].vPosition = v2_expand(edge1_prime, 0, 1);
+                new_occluder.elements[3].vPosition = v2_expand(edge0_prime, 0, 1);
+
+                render_state.occluder2D_vertex_buffer[render_state.draw_frame.occluder_vertex_count + 0] = new_occluder.elements[0];
+                render_state.occluder2D_vertex_buffer[render_state.draw_frame.occluder_vertex_count + 1] = new_occluder.elements[1];
+                render_state.occluder2D_vertex_buffer[render_state.draw_frame.occluder_vertex_count + 2] = new_occluder.elements[2];
+                render_state.occluder2D_vertex_buffer[render_state.draw_frame.occluder_vertex_count + 3] = new_occluder.elements[3];
+
+                render_state.draw_frame.occluder_vertex_count += 4;
+           }
         }
     }
 }
