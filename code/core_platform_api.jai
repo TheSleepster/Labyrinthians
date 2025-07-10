@@ -8,7 +8,7 @@
 }
 #if OS == .MACOS
 {
-    #assert false "MacOSX is not a supported OS...\n";
+    #assert false "MacOSX is not a real OS...\n";
 }
 
 /*
@@ -42,6 +42,7 @@ os_unload_dynamic_library ::        (library: *OS_Dynamic_Libarary);
 os_get_proc_address       ::        (library: *OS_Dynamic_Libarary, proc_name: string) -> *void;
 os_exit_process           ::        ();
 */
+
 
 interlocked_compare_exchange :: compare_and_swap;
 interlocked_add              :: atomic_add;

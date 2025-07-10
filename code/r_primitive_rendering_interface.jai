@@ -561,26 +561,6 @@ DRAWING:
         {
             light := *render_state.engine_point_light_buffer[occluder.influenced_light_index];
             assert(light != null);
-
-            // generate the shadow quad relative to the light and add it to the vertex buffer
-            for vertex_index: 0..4 - 1
-            {
-                edge0: Vector2 = occluder.elements[vertex_index].vPosition.xy;
-                edge1: Vector2 = occluder.elements[(vertex_index + 1) % 4].vPosition.xy;
-
-                edge0_light_vector: Vector2 = edge0 - light.ws_position;
-                edge1_light_vector: Vector2 = edge1 - light.ws_position;
-
-                projection_factor: float32 = 1000;
-                edge0_prime := edge0 + edge0_light_vector * projection_factor;
-                edge1_prime := edge1 + edge1_light_vector * projection_factor;
-
-                occluder.elements[0].vPosition = v2_expand(edge0,       0, 1);
-                occluder.elements[1].vPosition = v2_expand(edge1,       0, 1);
-                occluder.elements[2].vPosition = v2_expand(edge0_prime, 0, 1);
-                occluder.elements[3].vPosition = v2_expand(edge1_prime, 0, 1);
-            }
-
             cell_x: u32 = light.light_atlas_cell_index % (LIGHTMAP_SIZE / MAX_LIGHT_RADIUS);
             cell_y: u32 = light.light_atlas_cell_index / (LIGHTMAP_SIZE / MAX_LIGHT_RADIUS);
 
@@ -596,23 +576,15 @@ DRAWING:
             occluder.top_right.vTexelData    = .{cell_U + light_cell_scale, cell_V};
             occluder.bottom_left.vTexelData  = .{cell_U,                    cell_V + light_cell_scale};
             occluder.bottom_right.vTexelData = .{cell_U + light_cell_scale, cell_V + light_cell_scale};
-            
             for *element: occluder.quad_data.elements
             {
                 element.vColor = light_mask;
             }
 
-            bottom_left_vertex  := *render_state.occluder2D_vertex_buffer[render_state.draw_frame.occluder_vertex_count + 0];
-            top_left_vertex     := *render_state.occluder2D_vertex_buffer[render_state.draw_frame.occluder_vertex_count + 1];
-            top_right_vertex    := *render_state.occluder2D_vertex_buffer[render_state.draw_frame.occluder_vertex_count + 2];
-            bottom_right_vertex := *render_state.occluder2D_vertex_buffer[render_state.draw_frame.occluder_vertex_count + 3];
-
-            top_left_vertex.*     = occluder.top_left;
-            top_right_vertex.*    = occluder.top_right;
-            bottom_left_vertex.*  = occluder.bottom_left;
-            bottom_right_vertex.* = occluder.bottom_right;
-
-            render_state.draw_frame.occluder_vertex_count += 4;
+            // generate the shadow quad relative to the light and add it to the vertex buffer
+            for vertex_index: 0..4 - 1
+            {
+            }
         }
     }
 }

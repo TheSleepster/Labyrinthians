@@ -31,7 +31,7 @@ MAX_LIGHTS                  :: 256;
 MAX_OCCLUDERS               :: 2000;
 
 MAX_LIGHT_RADIUS            :: 256;
-LIGHTMAP_SIZE               :: 2048;
+LIGHTMAP_SIZE               :: 256;
 
 r_default_render_material: *Render_Material;
 
@@ -1104,11 +1104,11 @@ DEBUG_draw_test_sprites_experimental :: (render_state: *Render_State, asset_mana
     render_state.draw_frame.active_shader             = asset_get_shader(asset_manager, "Basic_Shader");
     render_state.draw_frame.active_view_matrix        = mat4_identity();
     render_state.draw_frame.active_projection_matrix  = orthographic_projection_matrix(320 * -0.5,
-                                                                                      320 *  0.5,
-                                                                                      180 * -0.5,
-                                                                                      180 *  0.5,
-                                                                                     -1.0,
-                                                                                      1.0);
+                                                                                       320 *  0.5,
+                                                                                       180 * -0.5,
+                                                                                       180 *  0.5,
+                                                                                       -1.0,
+                                                                                       1.0);
     r_push_render_layer(render_state, 17);
     r_draw_quad(render_state, .{-300,-160}, .{640, 360}, .{0.01, 0.01, 0.01, 1});
     r_push_render_layer(render_state, 16);
@@ -1318,34 +1318,38 @@ r_experimental_DEFERRED_rendering :: (render_state: *Render_State, asset_manager
                             render_state.occluder2D_vertex_buffer.data);
 
             glUseProgram(render_state.shadow_pass_shader.program_id);
-            render_state.update_uniform(render_state.shadow_pass_shader,
-                                       "uViewMatrix",
-                                       *render_state.draw_frame.active_view_matrix._11);
+
+            atlas_proj_matrix := orthographic_projection_matrix(LIGHTMAP_SIZE * -0.5,
+                                                                LIGHTMAP_SIZE *  0.5,
+                                                                LIGHTMAP_SIZE * -0.5,
+                                                                LIGHTMAP_SIZE *  0.5,
+                                                                -1.0,
+                                                                 1.0);
             render_state.update_uniform(render_state.shadow_pass_shader,
                                        "uProjectionMatrix",
                                        *render_state.draw_frame.active_projection_matrix._11);
 
             r_update_shader_data(null, render_state.shadow_pass_shader);
             glDrawElements(GL_TRIANGLES,
-                           render_state.draw_frame.occluder2D_count * 6,
+                           (render_state.draw_frame.occluder_vertex_count / 4) * 6,
                            GL_UNSIGNED_INT,
                            null);
         }
 
         // NOTE(Sleepster):  RENDER LIGHTS 
         {
-            glBindBuffer(GL_ARRAY_BUFFER, render_state.primary_vbo_id);
-            glBufferSubData(GL_ARRAY_BUFFER,
-                            0,
-                            render_state.draw_frame.lightmap_vertex_count * size_of(Vertex),
-                            render_state.lightmap_vertex_buffer.data);
+            // glBindBuffer(GL_ARRAY_BUFFER, render_state.primary_vbo_id);
+            // glBufferSubData(GL_ARRAY_BUFFER,
+            //                 0,
+            //                 render_state.draw_frame.lightmap_vertex_count * size_of(Vertex),
+            //                 render_state.lightmap_vertex_buffer.data);
 
-            glUseProgram(render_state.lightmap_shader.program_id);
-            glDrawElementsInstanced(GL_TRIANGLES,
-                                    6,
-                                    GL_UNSIGNED_INT,
-                                    null,
-                                    render_state.draw_frame.light_count);
+            // glUseProgram(render_state.lightmap_shader.program_id);
+            // glDrawElementsInstanced(GL_TRIANGLES,
+            //                         6,
+            //                         GL_UNSIGNED_INT,
+            //                         null,
+            //                         render_state.draw_frame.light_count);
 
         }
     }

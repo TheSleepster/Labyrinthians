@@ -8,7 +8,6 @@ layout(location = 5) in uint vTextureIndex;
 layout(location = 6) in uint vRenderLayer;
 
 uniform mat4 uProjectionMatrix;
-uniform mat4 uViewMatrix;
 
 out vec4 vColorMask;
 out vec2 vAtlasUVs;
@@ -18,7 +17,7 @@ main()
 {
     vColorMask  = vColor;
     vAtlasUVs   = vTexelData;
-    gl_Position = uProjectionMatrix * uViewMatrix * vPosition;
+    gl_Position = uProjectionMatrix * vPosition;
 }
 
 #endif
@@ -33,7 +32,8 @@ out vec4 vFragColor;
 void
 main()
 {
-    vFragColor = vColorMask;
+    vFragColor = vec4(1.0) - vColorMask;
 }
 
 #endif
+

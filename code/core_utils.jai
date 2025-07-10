@@ -99,6 +99,11 @@ v2_round :: (A: Vector2) -> Vector2
     return result;
 }
 
+v2_perpendicular :: (A: Vector2) -> Vector2
+{
+    return (Vector2).{-A.y, A.x};
+}
+
 approach_target :: (value: *float32, target_value: float32, rate: float32, delta: float32)
 {
     <<value += cast(float32)(target_value - <<value) * (1.0 - pow(2.0, -rate * delta));
