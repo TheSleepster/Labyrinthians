@@ -228,6 +228,11 @@ operator == :: (A: iVector2, B: iVector2) -> bool
     return A.x == B.x || A.y == B.y;
 }
 
+operator > :: (A: Vector2, B: Vector2) -> bool
+{
+    return A.x > B.x && A.y > B.y;
+}
+
 v2_cast :: inline (vector: iVector2) -> Vector2
 {
     result: Vector2 = ---;

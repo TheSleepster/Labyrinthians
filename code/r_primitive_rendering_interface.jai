@@ -70,9 +70,10 @@ Render_Quad :: struct
 Occluder2D :: struct
 {
     using quad_data: Render_Quad;
+
     light_atlas_cell_index   : u32;
     light_atlas_channel_index: u32;
-    influenced_light_index   : s32 = -1;
+    influenced_light_index   : s32;
 };
 
 r_create_draw_quad :: (render_state  : *Render_State,
@@ -485,19 +486,60 @@ DRAWING:
          ensure proper writing.
 */
     draw_frame := *render_state.draw_frame;
+    render_state.draw_frame.light_atlas_channel_index = 0;
+
+    Light_Occluder_Pair :: struct
+    {
+        light_index   : u32;
+        occluder_index: u32;
+    };
+
+    light_occluder_pairs := c_arena_push_array(*render_state.draw_frame_arena,
+                                                Light_Occluder_Pair,
+                                                draw_frame.occluder2D_count * draw_frame.light_count);
+    light_occluder_pair_count: u32;
+
+    // NOTE(Sleepster): Find out which occluders in the scene effect which lights 
     for light_index: 0..render_state.draw_frame.light_count - 1
     {
         working_light := *render_state.engine_point_light_buffer[light_index];
-        for occluder_index: 0..draw_frame.occluder2D_count - 1
+        working_light.light_atlas_channel_index = draw_frame.light_atlas_channel_index;
+        working_light.light_atlas_cell_index    = draw_frame.light_atlas_cell_index;
+        working_light.light_buffer_index        = light_index;
+
+        draw_frame.light_atlas_cell_index += 1;
+        draw_frame.light_atlas_channel_index = (draw_frame.light_atlas_channel_index + 1) % 3;
+
+        // 1.) We are only iterating over the scene's occluder
+        // count. This is bad because if we have an occluder that
+        // interferes with 2 lights we lose the ability to express that
+
+        // 2.) Currently, because of the previous point if a light is
+        // labelled by one light as the owner of the occluder, then the
+        // next light will override this information, making it
+        // incorrect.
+
+        old_count: u32 = draw_frame.occluder2D_count;
+        for occluder_index: 0..old_count - 1
         {
             occluder := *render_state.occluder2D_quad_buffer[occluder_index];
             if is_quad_within_light_radius(working_light, *occluder.quad_data)
             {
-                occluder.light_atlas_cell_index    = working_light.light_atlas_cell_index;
-                occluder.light_atlas_channel_index = working_light.light_atlas_channel_index;
-                occluder.influenced_light_index    = cast(s32)light_index;
+                light_occluder_pairs[light_occluder_pair_count] = .{light_index, occluder_index};
+                light_occluder_pair_count += 1;
             }
         }
+    }
+
+    // NOTE(Sleepster): Process that infromation, generating quads for
+    // each light. These quads store information about what cell in the
+    // big atlas this light belongs too and what channel.
+    for light_index: 0..render_state.draw_frame.light_count - 1
+    {
+        working_light := *render_state.engine_point_light_buffer[light_index];
+
+        light_mask: [4]float32;
+        light_mask.data[working_light.light_atlas_channel_index] = 1.0;
 
         // NOTE(Sleepster): Compute light atlas data
         cell_x: u32 = working_light.light_atlas_cell_index % (LIGHTMAP_SIZE / MAX_LIGHT_RADIUS);
@@ -507,9 +549,6 @@ DRAWING:
         cell_V: float32 = (cast(float32)cell_y * cast(float32)MAX_LIGHT_RADIUS) / LIGHTMAP_SIZE;
 
         light_cell_scale: float32 = cast(float32)(MAX_LIGHT_RADIUS / LIGHTMAP_SIZE);
-        
-        light_mask: Vector4 = .{0.0, 0.0, 0.0, 0.0};
-        light_mask.component[working_light.light_atlas_channel_index] = 1.0;
 
         // NOTE(Sleepster): build the vertices 
         {
@@ -525,10 +564,10 @@ DRAWING:
                 right  := working_light.ws_position.x + working_light.light_data.radius;
                 bottom := working_light.ws_position.y + working_light.light_data.radius;
 
-                top_left_vertex.vPosition     = v2_expand(.{left,   top}, 0, 1,);
-                top_right_vertex.vPosition    = v2_expand(.{right,  top}, 0, 1,);
-                bottom_left_vertex.vPosition  = v2_expand(.{right,  bottom}, 0, 1,);
-                bottom_right_vertex.vPosition = v2_expand(.{left,   bottom}, 0, 1,);
+                top_left_vertex.vPosition     = .{-128,  128, 0, 1};
+                top_right_vertex.vPosition    = .{ 128,  128, 0, 1,};
+                bottom_left_vertex.vPosition  = .{-128, -128, 0, 1,};
+                bottom_right_vertex.vPosition = .{ 128, -128, 0, 1,};
             }
 
             // NOTE(Sleepster): Lightmap atlas UVs
@@ -545,71 +584,133 @@ DRAWING:
             }
 
             // NOTE(Sleepster): Light Mask 
-            top_left_vertex.vColor     = light_mask;
-            top_right_vertex.vColor    = light_mask;
-            bottom_left_vertex.vColor  = light_mask;
-            bottom_right_vertex.vColor = light_mask;
+            top_left_vertex.vColor     = .{light_mask[0], light_mask[1], light_mask[2], light_mask[3]};
+            top_right_vertex.vColor    = .{light_mask[0], light_mask[1], light_mask[2], light_mask[3]};
+            bottom_left_vertex.vColor  = .{light_mask[0], light_mask[1], light_mask[2], light_mask[3]};
+            bottom_right_vertex.vColor = .{light_mask[0], light_mask[1], light_mask[2], light_mask[3]};
+
+            top_left_vertex.vTextureIndex     = working_light.light_buffer_index;
+            top_right_vertex.vTextureIndex    = working_light.light_buffer_index;
+            bottom_left_vertex.vTextureIndex  = working_light.light_buffer_index;
+            bottom_right_vertex.vTextureIndex = working_light.light_buffer_index;
         }
 
         render_state.draw_frame.lightmap_vertex_count += 4;
     }
 
-    for occluder_index: 0..render_state.draw_frame.occluder2D_count - 1
+    for pair_index: 0..light_occluder_pair_count - 1
     {
+        light_index    := light_occluder_pairs[pair_index].light_index;
+        occluder_index := light_occluder_pairs[pair_index].occluder_index;
+
+        light    := *render_state.engine_point_light_buffer[light_index];
         occluder := *render_state.occluder2D_quad_buffer[occluder_index];
-        if occluder.influenced_light_index != -1
+        assert(light != null);
+        cell_x: u32 = light.light_atlas_cell_index % (LIGHTMAP_SIZE / MAX_LIGHT_RADIUS);
+        cell_y: u32 = light.light_atlas_cell_index / (LIGHTMAP_SIZE / MAX_LIGHT_RADIUS);
+
+        cell_U : float32 = (cast(float32)cell_x * cast(float32)MAX_LIGHT_RADIUS) / LIGHTMAP_SIZE;
+        cell_V : float32 = (cast(float32)cell_y * cast(float32)MAX_LIGHT_RADIUS) / LIGHTMAP_SIZE;
+
+        light_cell_scale: float32 = cast(float32)(MAX_LIGHT_RADIUS / LIGHTMAP_SIZE);
+
+        light_mask: [4]float32;
+        light_mask.data[light.light_atlas_channel_index] = 1.0;
+        
+        occluder.top_left.vTexelData     = .{cell_U,                    cell_V};
+        occluder.top_right.vTexelData    = .{cell_U + light_cell_scale, cell_V};
+        occluder.bottom_left.vTexelData  = .{cell_U,                    cell_V + light_cell_scale};
+        occluder.bottom_right.vTexelData = .{cell_U + light_cell_scale, cell_V + light_cell_scale};
+        for *element: occluder.quad_data.elements
         {
-            light := *render_state.engine_point_light_buffer[occluder.influenced_light_index];
-            assert(light != null);
-            cell_x: u32 = light.light_atlas_cell_index % (LIGHTMAP_SIZE / MAX_LIGHT_RADIUS);
-            cell_y: u32 = light.light_atlas_cell_index / (LIGHTMAP_SIZE / MAX_LIGHT_RADIUS);
+            element.vColor = .{light_mask.data[0], light_mask.data[1], light_mask.data[2], light_mask.data[3]};
+        }
 
-            cell_U : float32 = (cast(float32)cell_x * cast(float32)MAX_LIGHT_RADIUS) / LIGHTMAP_SIZE;
-            cell_V : float32 = (cast(float32)cell_y * cast(float32)MAX_LIGHT_RADIUS) / LIGHTMAP_SIZE;
+        // NOTE(Sleepster): Find the furthest 2 vectors 
+        first_furthest_vertex : u32;
+        second_furthest_vertex: u32;
 
-            light_cell_scale: float32 = cast(float32)(MAX_LIGHT_RADIUS / LIGHTMAP_SIZE);
+        first_furthest_distance : float32;
+        second_furthest_distance: float32;
+        for vertex_index: 0..2
+        {
+            vertex0 := *occluder.elements[vertex_index];
+            vertex1 := *occluder.elements[vertex_index + 1];
+ 
+            first_distance_vector  := dot(vertex0.vPosition.xy - light.ws_position,
+                                          vertex0.vPosition.xy - light.ws_position);
 
-            light_mask: Vector4 = .{0.0, 0.0, 0.0, 0.0};
-            light_mask.component[light.light_atlas_channel_index] = 1.0;
-            
-            occluder.top_left.vTexelData     = .{cell_U,                    cell_V};
-            occluder.top_right.vTexelData    = .{cell_U + light_cell_scale, cell_V};
-            occluder.bottom_left.vTexelData  = .{cell_U,                    cell_V + light_cell_scale};
-            occluder.bottom_right.vTexelData = .{cell_U + light_cell_scale, cell_V + light_cell_scale};
-            for *element: occluder.quad_data.elements
+            second_distance_vector := dot(vertex1.vPosition.xy - light.ws_position,
+                                          vertex1.vPosition.xy - light.ws_position);
+
+            if first_distance_vector > first_furthest_distance
             {
-                element.vColor = light_mask;
+                first_furthest_distance = first_distance_vector;
+                first_furthest_vertex   = xx vertex_index;
             }
 
-            // generate the shadow quad relative to the light and add it to the vertex buffer
-            for vertex_index: 0..4 - 1
+            if second_distance_vector > second_furthest_distance
             {
-                edge0: Vector2 = occluder.elements[vertex_index].vPosition.xy;
-                edge1: Vector2 = occluder.elements[(vertex_index + 1) % 4].vPosition.xy;
+                second_furthest_distance = second_distance_vector;
+                second_furthest_vertex   = xx(vertex_index + 1);
+            }
 
-                edge0_light_direction_vector: Vector2 = normalize(edge0 - light.ws_position);
-                edge1_light_direction_vector: Vector2 = normalize(edge1 - light.ws_position);
-
-                projection: float32 = light.light_data.radius * 2.0;
-                edge0_prime := edge0 + (edge0_light_direction_vector * projection);
-                edge1_prime := edge1 + (edge1_light_direction_vector * projection); 
-
-                // TODO(Sleepster): this doesn't have to be a full copy 
-                new_occluder: Occluder2D;
-                new_occluder = occluder.*;
-
-                new_occluder.elements[0].vPosition = v2_expand(edge0, 0, 1);
-                new_occluder.elements[1].vPosition = v2_expand(edge1, 0, 1);
-                new_occluder.elements[2].vPosition = v2_expand(edge1_prime, 0, 1);
-                new_occluder.elements[3].vPosition = v2_expand(edge0_prime, 0, 1);
-
-                render_state.occluder2D_vertex_buffer[render_state.draw_frame.occluder_vertex_count + 0] = new_occluder.elements[0];
-                render_state.occluder2D_vertex_buffer[render_state.draw_frame.occluder_vertex_count + 1] = new_occluder.elements[1];
-                render_state.occluder2D_vertex_buffer[render_state.draw_frame.occluder_vertex_count + 2] = new_occluder.elements[2];
-                render_state.occluder2D_vertex_buffer[render_state.draw_frame.occluder_vertex_count + 3] = new_occluder.elements[3];
-
-                render_state.draw_frame.occluder_vertex_count += 4;
-           }
+            vertex_index += 1;
         }
+
+        edge0 := occluder.elements[first_furthest_vertex].vPosition.xy;
+        edge1 := occluder.elements[second_furthest_vertex].vPosition.xy;
+
+        edge0_light_direction_vector: Vector2 = normalize(edge0 - light.ws_position);
+        edge1_light_direction_vector: Vector2 = normalize(edge1 - light.ws_position);
+
+        projection: float32 = light.light_data.radius * 20.0;
+        edge0_prime := edge0 + (edge0_light_direction_vector * projection);
+        edge1_prime := edge1 + (edge1_light_direction_vector * projection); 
+
+        new_occluder: Occluder2D;
+        new_occluder = occluder.*;
+
+        new_occluder.elements[0].vPosition = v2_expand(edge0, 0, 1);
+        new_occluder.elements[1].vPosition = v2_expand(edge1, 0, 1);
+        new_occluder.elements[2].vPosition = v2_expand(edge1_prime, 0, 1);
+        new_occluder.elements[3].vPosition = v2_expand(edge0_prime, 0, 1);
+
+        render_state.occluder2D_vertex_buffer[render_state.draw_frame.occluder_vertex_count + 0] = new_occluder.elements[0];
+        render_state.occluder2D_vertex_buffer[render_state.draw_frame.occluder_vertex_count + 1] = new_occluder.elements[1];
+        render_state.occluder2D_vertex_buffer[render_state.draw_frame.occluder_vertex_count + 2] = new_occluder.elements[2];
+        render_state.occluder2D_vertex_buffer[render_state.draw_frame.occluder_vertex_count + 3] = new_occluder.elements[3];
+
+        render_state.draw_frame.occluder_vertex_count += 4;
     }
 }
+
+        // // generate the shadow quad relative to the light and add it to the vertex buffer
+        // for vertex_index: 0..4 - 1
+        // {
+        //     edge0: Vector2 = occluder.elements[vertex_index].vPosition.xy;
+        //     edge1: Vector2 = occluder.elements[(vertex_index + 1) % 4].vPosition.xy;
+
+        //     edge0_light_direction_vector: Vector2 = normalize(edge0 - light.ws_position);
+        //     edge1_light_direction_vector: Vector2 = normalize(edge1 - light.ws_position);
+
+        //     projection: float32 = light.light_data.radius * 20.0;
+        //     edge0_prime := edge0 + (edge0_light_direction_vector * projection);
+        //     edge1_prime := edge1 + (edge1_light_direction_vector * projection); 
+
+        //     // TODO(Sleepster): this doesn't have to be a full copy 
+        //     new_occluder: Occluder2D;
+        //     new_occluder = occluder.*;
+
+        //     new_occluder.elements[0].vPosition = v2_expand(edge0, 0, 1);
+        //     new_occluder.elements[1].vPosition = v2_expand(edge1, 0, 1);
+        //     new_occluder.elements[2].vPosition = v2_expand(edge1_prime, 0, 1);
+        //     new_occluder.elements[3].vPosition = v2_expand(edge0_prime, 0, 1);
+
+        //     render_state.occluder2D_vertex_buffer[render_state.draw_frame.occluder_vertex_count + 0] = new_occluder.elements[0];
+        //     render_state.occluder2D_vertex_buffer[render_state.draw_frame.occluder_vertex_count + 1] = new_occluder.elements[1];
+        //     render_state.occluder2D_vertex_buffer[render_state.draw_frame.occluder_vertex_count + 2] = new_occluder.elements[2];
+        //     render_state.occluder2D_vertex_buffer[render_state.draw_frame.occluder_vertex_count + 3] = new_occluder.elements[3];
+
+        //     render_state.draw_frame.occluder_vertex_count += 4;
+        // }

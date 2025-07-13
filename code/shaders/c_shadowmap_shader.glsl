@@ -32,7 +32,7 @@ out vec4 vFragColor;
 void
 main()
 {
-    vFragColor = vec4(1.0) - vColorMask;
+    vFragColor = vColorMask;
 }
 
 #endif

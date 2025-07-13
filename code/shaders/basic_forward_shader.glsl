@@ -130,10 +130,10 @@ main()
             float cosTheta          = dot(SpotlightDirection, normalize(LightToFrag));
             float cosSpotAngle      = cos(Light.SpotAngle);
             float LightDist         = length(LightPos - SnappedFragPos);
-            if (LightDist > Light.Radius) continue;
+            if(LightDist > Light.Radius) continue;
 
             float SpotEffect;
-            if (Light.SpotAngle < 3.1415926535)
+            if(Light.SpotAngle < 3.1415926535)
             {
                 float OuterAngle    = Light.SpotAngle;
                 float InnerAngle    = max(0.0, Light.SpotAngle - EdgeDelta);

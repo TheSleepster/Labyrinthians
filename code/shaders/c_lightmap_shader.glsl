@@ -14,6 +14,8 @@ struct point_light
     float                  padding[3];
 };
 
+#define PI 3.1415926535
+
 #ifdef VERTEX_SHADER
 layout(location = 0) in vec4 vPosition;
 layout(location = 1) in vec4 vColor;
@@ -28,29 +30,77 @@ uniform mat4 uProjectionMatrix;
 out vec4 vColorMask;
 out vec2 vAtlasUVs;
 
+out flat uint InstanceID;
+
 void
 main()
 {
     vColorMask  = vColor;
     vAtlasUVs   = vTexelData;
+    InstanceID  = vTextureIndex;
+
     gl_Position = uProjectionMatrix * vPosition;
 }
 #endif
 
 #ifdef FRAGMENT_SHADER
-layout(binding = 0) uniform sampler2D uShadowMap;
+layout(std430, binding = 0) buffer PointLightSBO
+{
+    point_light PointLights[];
+};
 
 in vec4 vColorMask;
 in vec2 vAtlasUVs;
+
+in flat uint InstanceID;
 
 out vec4 vFragColor;
 
 void
 main()
 {
-    vec4 TextureColor = texture(uShadowMap, vAtlasUVs, 0) * vColorMask; 
-    float Alpha       = TextureColor.r + TextureColor.g + TextureColor.b + TextureColor.a;
+    const float TileSize = 4.0;
+    
+    point_light Light = PointLights[InstanceID];
+    vec2 FragPos      = gl_FragCoord.xy;
+    vec2 FragTilePos    = floor(FragPos.xy / TileSize) * TileSize + TileSize * 0.5;
 
-    vFragColor = vec4(vColorMask.rgb, Alpha);
+    vec2 LightPos     = {128, 128};
+    vec2 LightDir     = normalize(vec2(LightPos - FragTilePos));
+    vec2 SpotlightDir = normalize(Light.Direction);
+
+    vec2  FragToLight  = FragPos - LightPos;
+    float cosTheta     = dot(SpotlightDir, normalize(FragToLight));
+    float cosSpotAngle = cos(Light.SpotAngle);
+    float LightDist    = length(LightPos - FragTilePos);
+
+    if(LightDist > Light.Radius) return;
+
+    float SpotEffect;
+    float EdgeDelta = 0.087;
+    if(Light.SpotAngle < PI)
+    {
+        float OuterAngle    = Light.SpotAngle;
+        float InnerAngle    = max(0.0, Light.SpotAngle - EdgeDelta);
+
+        float cosOuter      = cos(OuterAngle);
+        float cosInner      = cos(InnerAngle);
+
+        float AngularEffect = smoothstep(cosOuter, cosInner, cosTheta);
+        float RadialEffect  = smoothstep(Light.Radius, 0.0, LightDist);
+
+        SpotEffect = AngularEffect * RadialEffect;
+    }
+    else
+    {
+        SpotEffect = pow(1 - LightDist / Light.Radius, 2.5);
+    }
+
+    float SpotStrength = SpotEffect * Light.Strength;
+    vec4  LightContrib = (1.0 - exp(-0.5 * SpotStrength)) * vColorMask;
+            
+    vec4 EffectiveLightColor = LightContrib;
+
+    vFragColor    = EffectiveLightColor;
 }
 #endif

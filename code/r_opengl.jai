@@ -56,8 +56,10 @@ Point_Light :: struct
 {
     light_data               : *Shader_Light_Data;
     ws_position              :  Vector2;
+
     light_atlas_cell_index   :  u32;
     light_atlas_channel_index:  u32;
+    light_buffer_index       :  u32;
 };
 
 /*
@@ -175,9 +177,6 @@ Draw_Frame :: struct
 
     bound_texture_counter     :   u32; 
 
-    // TODO(Sleepster): These arrays are not transient; 
-    light_count               :   u32;
-
     active_view_matrix        :   Matrix4;
     active_projection_matrix  :   Matrix4;
     active_shader             :  *GPU_Shader;
@@ -199,6 +198,8 @@ Draw_Frame :: struct
 
     occluder_vertex_count     :   u32;
     occluder2D_count          :   u32;
+    
+    light_count               :   u32;
 };
 
 Render_State :: struct
@@ -1133,6 +1134,7 @@ DEBUG_draw_test_sprites_experimental :: (render_state: *Render_State, asset_mana
     }
 
     r_create_point_light(render_state, .{0,  0}, .{1.0, 1.0,  1.0, 1.0}, .{1, 1}, deg_to_rad(180), 100, 2.0);
+    //r_create_point_light(render_state, .{60,  0}, .{1.0, 1.0,  1.0, 1.0}, .{1, 1}, deg_to_rad(180), 100, 2.0);
 
     default_material := asset_get_render_material(asset_manager, "Default_Material");
     
@@ -1261,7 +1263,6 @@ r_experimental_DEFERRED_rendering :: (render_state: *Render_State, asset_manager
             glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
             glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
 
-
             glTexImage2D(GL_TEXTURE_2D, 0, GL_DEPTH_COMPONENT24, 
                          render_engine_width, render_engine_height, 0, 
                          GL_DEPTH_COMPONENT, GL_UNSIGNED_BYTE, null);
@@ -1295,10 +1296,6 @@ r_experimental_DEFERRED_rendering :: (render_state: *Render_State, asset_manager
 
         experimental_init = true;
     }
-    glClearColor(0.00, 0.00, 0.00, 1.0);
-    glClearDepth(0.0);
-    glClear(GL_COLOR_BUFFER_BIT|GL_DEPTH_BUFFER_BIT);
-
     glBindVertexArray(render_state.primary_vao_id);
     glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, render_state.primary_ebo_id);
 
@@ -1306,19 +1303,58 @@ r_experimental_DEFERRED_rendering :: (render_state: *Render_State, asset_manager
     // NOTE(Sleepster): Shadow and lighting pass 
     {
         glBindFramebuffer(GL_FRAMEBUFFER, s_framebuffer_id);
-        glClearColor(1.0, 1.0, 1.0, 1.0);
+        glClearColor(0.0, 0.0, 0.0, 0.0);
         glClear(GL_COLOR_BUFFER_BIT);
 
         glViewport(0, 0, LIGHTMAP_SIZE, LIGHTMAP_SIZE);
+
+        /*
+            TODO:
+            Render the lighting using glDrawElementsInstanced for each light. (an Instance per light)
+            Then cut out the shadows for the specific color mask.
+        */
+
         atlas_proj_matrix := orthographic_projection_matrix(LIGHTMAP_SIZE * -0.5,
                                                             LIGHTMAP_SIZE *  0.5,
                                                             LIGHTMAP_SIZE * -0.5,
                                                             LIGHTMAP_SIZE *  0.5,
                                                             -1.0,
                                                             1.0);
+        
+        glEnable(GL_BLEND);        
+        // NOTE(Sleepster): RENDER LIGHTS 
+        {
+            glBlendFunc(GL_ONE, GL_ONE);
+            glBlendEquation(GL_FUNC_ADD);
+            
+            glBindBuffer(GL_ARRAY_BUFFER, render_state.primary_vbo_id);
+            glBufferSubData(GL_ARRAY_BUFFER,
+                            0,
+                            render_state.draw_frame.lightmap_vertex_count * size_of(Vertex),
+                            render_state.lightmap_vertex_buffer.data);
+
+            glUseProgram(render_state.lightmap_shader.program_id);
+            render_state.update_uniform(render_state.lightmap_shader,
+                                       "uProjectionMatrix",
+                                       *atlas_proj_matrix._11);
+            render_state.update_buffer(render_state.lightmap_shader,
+                                       "PointLightSBO",
+                                       size_of(Shader_Light_Data) * render_state.draw_frame.light_count,
+                                       render_state.shader_point_light_buffer.data);
+
+            r_update_shader_data(null, render_state.lightmap_shader);
+            
+            glDrawElements(GL_TRIANGLES,
+                           render_state.draw_frame.light_count * 6,
+                           GL_UNSIGNED_INT,
+                           null);
+        }
 
         // NOTE(Sleepster): RENDER SHADOWS 
         {
+            glBlendFunc(GL_ONE, GL_ONE);
+            glBlendEquation(GL_FUNC_SUBTRACT);
+
             glBindBuffer(GL_ARRAY_BUFFER, render_state.primary_vbo_id);
             glBufferSubData(GL_ARRAY_BUFFER,
                             0,
@@ -1328,7 +1364,7 @@ r_experimental_DEFERRED_rendering :: (render_state: *Render_State, asset_manager
             glUseProgram(render_state.shadow_pass_shader.program_id);
             render_state.update_uniform(render_state.shadow_pass_shader,
                                        "uProjectionMatrix",
-                                       *render_state.draw_frame.active_projection_matrix._11);
+                                       *atlas_proj_matrix._11);
 
             r_update_shader_data(null, render_state.shadow_pass_shader);
             glDrawElements(GL_TRIANGLES,
@@ -1336,36 +1372,22 @@ r_experimental_DEFERRED_rendering :: (render_state: *Render_State, asset_manager
                            GL_UNSIGNED_INT,
                            null);
         }
-
-        // NOTE(Sleepster):  RENDER LIGHTS 
-        {
-            glBlendFunc(GL_ONE, GL_ONE);
-            
-            glBindBuffer(GL_ARRAY_BUFFER, render_state.primary_vbo_id);
-            glBufferSubData(GL_ARRAY_BUFFER,
-                            0,
-                            render_state.draw_frame.lightmap_vertex_count * size_of(Vertex),
-                            render_state.lightmap_vertex_buffer.data);
-
-            glUseProgram(render_state.lightmap_shader.program_id);
-            glDrawElementsInstanced(GL_TRIANGLES,
-                                    6,
-                                    GL_UNSIGNED_INT,
-                                    null,
-                                    render_state.draw_frame.light_count);
-
-        }
     }
 
     glBindFramebuffer(GL_FRAMEBUFFER, framebuffer_id);
+
     glViewport(0, 0, render_engine_width, render_engine_height);
-    glClear(GL_COLOR_BUFFER_BIT|GL_DEPTH_BUFFER_BIT);
+    glClearColor(0.0, 0.0, 0.0, 1.0);
+    glClearDepth(0.0);
 
     glEnable(GL_DEPTH_TEST);
+    glClear(GL_COLOR_BUFFER_BIT|GL_DEPTH_BUFFER_BIT);
 
-    glEnable(GL_BLEND);        
     glBlendEquation(GL_FUNC_ADD);
     glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+
+    glDepthFunc(GL_GREATER);
+    glDepthMask(GL_TRUE);
 
     // NOTE(Sleepster): Primary Geometry Pass 
     r_handle_group_buffers(render_state);
@@ -1403,6 +1425,10 @@ r_experimental_DEFERRED_rendering :: (render_state: *Render_State, asset_manager
                            cast(*void)((opaque_quad_count * 6) * size_of(u32)));
         }
     }
+    glBindFramebuffer(GL_FRAMEBUFFER, 0);
+    glClearColor(0.00, 0.00, 0.00, 1.0);
+    glClearDepth(0.0);
+    glClear(GL_COLOR_BUFFER_BIT|GL_DEPTH_BUFFER_BIT);
 
     glBindFramebuffer(GL_DRAW_FRAMEBUFFER, 0);
     glBindFramebuffer(GL_READ_FRAMEBUFFER, framebuffer_id);
