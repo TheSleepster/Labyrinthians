@@ -1117,7 +1117,8 @@ DEBUG_draw_test_sprites_experimental :: (render_state: *Render_State, asset_mana
     r_push_render_layer(render_state, 16);
 
     r_draw_quad(render_state, .{ 60, -60}, .{8, 96},  .{1, 0, 0, 1}, U32_MAX, .RO_OCCLUDER);
-    r_draw_quad(render_state, .{-60,   0}, .{16, 16}, .{1, 0, 0, 1}, U32_MAX, .RO_UNLIT);
+    r_draw_quad(render_state, .{-60,   0}, .{16, 16}, .{1, 0, 0, 1}, U32_MAX, .RO_OCCLUDER);
+    r_draw_quad(render_state, .{  0,  60}, .{16, 16}, .{1, 0, 0, 1}, U32_MAX, .RO_OCCLUDER);
 
     sprite  := asset_get_sprite(asset_manager,  "player");
     texture := asset_get_texture(asset_manager, "player");
@@ -1134,7 +1135,7 @@ DEBUG_draw_test_sprites_experimental :: (render_state: *Render_State, asset_mana
     }
 
     r_create_point_light(render_state, .{0,  0}, .{1.0, 1.0,  1.0, 1.0}, .{1, 1}, deg_to_rad(180), 100, 2.0);
-    //r_create_point_light(render_state, .{60,  0}, .{1.0, 1.0,  1.0, 1.0}, .{1, 1}, deg_to_rad(180), 100, 2.0);
+    r_create_point_light(render_state, .{60,  0}, .{1.0, 1.0,  1.0, 1.0}, .{1, 1}, deg_to_rad(180), 100, 2.0);
 
     default_material := asset_get_render_material(asset_manager, "Default_Material");
     
@@ -1291,6 +1292,7 @@ r_experimental_DEFERRED_rendering :: (render_state: *Render_State, asset_manager
                          LIGHTMAP_SIZE, LIGHTMAP_SIZE, 0, 
                          GL_RGB, GL_FLOAT, null);
 
+
             glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, sfb_lightmap, 0);
         }
 
@@ -1353,7 +1355,7 @@ r_experimental_DEFERRED_rendering :: (render_state: *Render_State, asset_manager
         // NOTE(Sleepster): RENDER SHADOWS 
         {
             glBlendFunc(GL_ONE, GL_ONE);
-            glBlendEquation(GL_FUNC_SUBTRACT);
+            glBlendEquation(GL_FUNC_REVERSE_SUBTRACT);
 
             glBindBuffer(GL_ARRAY_BUFFER, render_state.primary_vbo_id);
             glBufferSubData(GL_ARRAY_BUFFER,

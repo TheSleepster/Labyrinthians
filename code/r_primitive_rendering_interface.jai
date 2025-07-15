@@ -609,8 +609,8 @@ DRAWING:
         cell_x: u32 = light.light_atlas_cell_index % (LIGHTMAP_SIZE / MAX_LIGHT_RADIUS);
         cell_y: u32 = light.light_atlas_cell_index / (LIGHTMAP_SIZE / MAX_LIGHT_RADIUS);
 
-        cell_U : float32 = (cast(float32)cell_x * cast(float32)MAX_LIGHT_RADIUS) / LIGHTMAP_SIZE;
-        cell_V : float32 = (cast(float32)cell_y * cast(float32)MAX_LIGHT_RADIUS) / LIGHTMAP_SIZE;
+        cell_U: float32 = (cast(float32)cell_x * cast(float32)MAX_LIGHT_RADIUS) / LIGHTMAP_SIZE;
+        cell_V: float32 = (cast(float32)cell_y * cast(float32)MAX_LIGHT_RADIUS) / LIGHTMAP_SIZE;
 
         light_cell_scale: float32 = cast(float32)(MAX_LIGHT_RADIUS / LIGHTMAP_SIZE);
 
@@ -635,7 +635,7 @@ DRAWING:
         for vertex_index: 0..2
         {
             vertex0 := *occluder.elements[vertex_index];
-            vertex1 := *occluder.elements[vertex_index + 1];
+            vertex1 := *occluder.elements[(vertex_index + 1) % 4];
  
             first_distance_vector  := dot(vertex0.vPosition.xy - light.ws_position,
                                           vertex0.vPosition.xy - light.ws_position);
@@ -658,8 +658,9 @@ DRAWING:
             vertex_index += 1;
         }
 
-        edge0 := occluder.elements[first_furthest_vertex].vPosition.xy;
-        edge1 := occluder.elements[second_furthest_vertex].vPosition.xy;
+        // TODO(Sleepster): Maybe do something actually smart here and not this
+        edge0 := occluder.elements[1].vPosition.xy;
+        edge1 := occluder.elements[3].vPosition.xy;
 
         edge0_light_direction_vector: Vector2 = normalize(edge0 - light.ws_position);
         edge1_light_direction_vector: Vector2 = normalize(edge1 - light.ws_position);
