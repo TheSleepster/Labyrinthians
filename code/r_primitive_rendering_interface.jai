@@ -44,8 +44,8 @@ Render_Triangle :: struct
         elements: [3]Vertex;
         struct
         {
-            top_middle  : Vertex;
             bottom_left : Vertex;
+            top_middle  : Vertex;
             bottom_right: Vertex;
         };
     };
@@ -59,9 +59,9 @@ Render_Quad :: struct
         elements: [4]Vertex;
         struct
         {
+            bottom_left : Vertex;
             top_left    : Vertex;
             top_right   : Vertex;
-            bottom_left : Vertex;
             bottom_right: Vertex;
         };
     };
