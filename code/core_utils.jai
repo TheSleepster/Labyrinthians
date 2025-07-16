@@ -228,11 +228,6 @@ operator == :: (A: iVector2, B: iVector2) -> bool
     return A.x == B.x || A.y == B.y;
 }
 
-operator > :: (A: Vector2, B: Vector2) -> bool
-{
-    return A.x > B.x && A.y > B.y;
-}
-
 v2_cast :: inline (vector: iVector2) -> Vector2
 {
     result: Vector2 = ---;
@@ -260,6 +255,39 @@ rad_to_deg :: inline (A: float32) -> float32
 {
    return A * (180 / PI); 
 }
+
+vec2_create :: inline (A: float32) -> Vector2
+{
+    return .{A, A};
+}
+
+// min :: (A: $T, values: ..T) -> T
+// {
+//     result := A;
+//     for value: values
+//     {
+//         if length_squared(value) < length_squared(A)
+//         {
+//             result = value;
+//         }
+//     }
+
+//     return result;
+// }
+
+// max :: (A: $T, values: ..T) -> T
+// {
+//     result := A;
+//     for value: values
+//     {
+//         if length_squared(value) > length_squared(A)
+//         {
+//             result = value;
+//         }
+//     }
+
+//     return result;
+// }
 
 ////////////////
 // MATRIX STUFF

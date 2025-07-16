@@ -1,6 +1,8 @@
 #import "Compiler";
 #import "Basic";
 
+STACK_SIZE :: (24 * 1024) * 1024;
+
 build_release :: (workspace: Workspace)
 {
     options   := get_build_options(workspace);
@@ -55,7 +57,7 @@ build :: ()
     options   := get_build_options(workspace);
     args      := options.compile_time_command_line;
 
-    is_release := array_find(args, "-release");
+    is_release := array_find(args, "release");
     if is_release
     {
         build_release(workspace);

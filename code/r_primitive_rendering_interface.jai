@@ -457,6 +457,12 @@ r_set_render_matrices :: inline (render_state: *Render_State, view_matrix: Matri
     render_state.draw_frame.active_projection_matrix = projection_matrix;
 }
 
+Light_Occluder_Pair :: struct
+{
+    light_index   : u32;
+    occluder_index: u32;
+};
+
 r_handle_lighting_data :: (render_state: *Render_State)
 {
 /*
@@ -487,12 +493,6 @@ DRAWING:
 */
     draw_frame := *render_state.draw_frame;
     render_state.draw_frame.light_atlas_channel_index = 0;
-
-    Light_Occluder_Pair :: struct
-    {
-        light_index   : u32;
-        occluder_index: u32;
-    };
 
     light_occluder_pairs := c_arena_push_array(*render_state.draw_frame_arena,
                                                 Light_Occluder_Pair,
@@ -626,56 +626,51 @@ DRAWING:
             element.vColor = .{light_mask.data[0], light_mask.data[1], light_mask.data[2], light_mask.data[3]};
         }
 
-        // NOTE(Sleepster): Find the furthest 2 vectors 
-        first_furthest_vertex : u32;
-        second_furthest_vertex: u32;
+        quad_center_vector := (occluder.elements[0].vPosition.xy + occluder.elements[1].vPosition.xy +
+                               occluder.elements[2].vPosition.xy + occluder.elements[3].vPosition.xy) * vec2_create(0.25);
 
-        first_furthest_distance : float32;
-        second_furthest_distance: float32;
-        for vertex_index: 0..2
+        light_dir_from_quad_center := quad_center_vector - light.ws_position;
+        perpendicular_vector       := (Vector2).{-light_dir_from_quad_center.y, light_dir_from_quad_center.x};
+
+        vertex_dot_products: [4]float32;
+        for index: 0..4 - 1  
         {
-            vertex0 := *occluder.elements[vertex_index];
-            vertex1 := *occluder.elements[(vertex_index + 1) % 4];
- 
-            first_distance_vector  := dot(vertex0.vPosition.xy - light.ws_position,
-                                          vertex0.vPosition.xy - light.ws_position);
-
-            second_distance_vector := dot(vertex1.vPosition.xy - light.ws_position,
-                                          vertex1.vPosition.xy - light.ws_position);
-
-            if first_distance_vector > first_furthest_distance
-            {
-                first_furthest_distance = first_distance_vector;
-                first_furthest_vertex   = xx vertex_index;
-            }
-
-            if second_distance_vector > second_furthest_distance
-            {
-                second_furthest_distance = second_distance_vector;
-                second_furthest_vertex   = xx(vertex_index + 1);
-            }
-
-            vertex_index += 1;
+            light_vector              := occluder.elements[index].vPosition.xy - light.ws_position;
+            vertex_dot_products[index] = dot(light_vector, perpendicular_vector); 
         }
 
-        // TODO(Sleepster): Maybe do something actually smart here and not this
-        edge0 := occluder.elements[1].vPosition.xy;
-        edge1 := occluder.elements[3].vPosition.xy;
+        v_min_dot := min(vertex_dot_products[0], vertex_dot_products[1], vertex_dot_products[2], vertex_dot_products[3]);
+        v_max_dot := max(vertex_dot_products[0], vertex_dot_products[1], vertex_dot_products[2], vertex_dot_products[3]);
 
-        edge0_light_direction_vector: Vector2 = normalize(edge0 - light.ws_position);
-        edge1_light_direction_vector: Vector2 = normalize(edge1 - light.ws_position);
+        min_vertex_index: s64;
+        max_vertex_index: s64;
+        for index: 0..3
+        {
+            value := vertex_dot_products[index];
+            if value == v_min_dot
+            {
+                min_vertex_index = index;
+            }
+            if value == v_max_dot
+            {
+                max_vertex_index = index;
+            }
+        }
 
-        projection: float32 = light.light_data.radius * 20.0;
-        edge0_prime := edge0 + (edge0_light_direction_vector * projection);
-        edge1_prime := edge1 + (edge1_light_direction_vector * projection); 
+        v_min := occluder.elements[min_vertex_index].vPosition.xy;
+        v_max := occluder.elements[max_vertex_index].vPosition.xy;
+
+        projection_factor := (Vector2).{100, 100};
+        v_min_proj: Vector2 = v_min + projection_factor * (v_min - light.ws_position);
+        v_max_proj: Vector2 = v_max + projection_factor * (v_max - light.ws_position);
 
         new_occluder: Occluder2D;
         new_occluder = occluder.*;
 
-        new_occluder.elements[0].vPosition = v2_expand(edge0, 0, 1);
-        new_occluder.elements[1].vPosition = v2_expand(edge1, 0, 1);
-        new_occluder.elements[2].vPosition = v2_expand(edge1_prime, 0, 1);
-        new_occluder.elements[3].vPosition = v2_expand(edge0_prime, 0, 1);
+        new_occluder.elements[0].vPosition = v2_expand(v_min, 0, 1);
+        new_occluder.elements[1].vPosition = v2_expand(v_max, 0, 1);
+        new_occluder.elements[2].vPosition = v2_expand(v_max_proj, 0, 1);
+        new_occluder.elements[3].vPosition = v2_expand(v_min_proj, 0, 1);
 
         render_state.occluder2D_vertex_buffer[render_state.draw_frame.occluder_vertex_count + 0] = new_occluder.elements[0];
         render_state.occluder2D_vertex_buffer[render_state.draw_frame.occluder_vertex_count + 1] = new_occluder.elements[1];
