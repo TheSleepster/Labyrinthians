@@ -7,12 +7,19 @@ BASIC_SHADER_SOURCE_TEXT :: #run -> string
     return read_entire_file("shaders/basic_forward_shader.glsl");
 };
 
-c_SHADOWMAP_SHADER_TEXT :: #run -> string
+C_SHADOWMAP_SHADER_TEXT :: #run -> string
 {
     return read_entire_file("shaders/c_shadowmap_shader.glsl");
 }
 
-c_LIGHTMAP_SHADER_TEXT :: #run -> string
+C_LIGHTMAP_SHADER_TEXT :: #run -> string
 {
     return read_entire_file("shaders/c_lightmap_shader.glsl");
 }
+
+C_COMPOSITE_SHADER_TEXT :: #run -> string
+{
+    return read_entire_file("shaders/c_composite_shader.glsl");
+}
+
+

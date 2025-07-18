@@ -5,13 +5,16 @@
 struct point_light
 {
     vec4                   Color;
+    vec4                   LightAtlasColorMask;
+    float                  padding_0[2];
+    vec2                   LightAtlasUVs;
     vec2                   vsPosition;
     vec2                   csPosition;
     vec2                   Direction;
     float                  SpotAngle;
     float                  Radius;
     float                  Strength; 
-    float                  padding[3];
+    float                  padding_1[3];
 };
 
 #ifdef VERTEX_SHADER

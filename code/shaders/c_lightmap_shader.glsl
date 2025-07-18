@@ -5,13 +5,16 @@
 struct point_light
 {
     vec4                   Color;
+    vec4                   LightAtlasColorMask;
+    float                  padding_0[2];
+    vec2                   LightAtlasUVs;
     vec2                   vsPosition;
     vec2                   csPosition;
     vec2                   Direction;
     float                  SpotAngle;
     float                  Radius;
     float                  Strength; 
-    float                  padding[3];
+    float                  padding_1[3];
 };
 
 #define PI 3.1415926535
@@ -28,6 +31,7 @@ layout(location = 6) in uint vRenderLayer;
 uniform mat4 uProjectionMatrix;
 
 out vec4 vColorMask;
+out vec2 vLocalSpace;
 out vec2 vAtlasUVs;
 
 out flat uint InstanceID;
@@ -36,6 +40,7 @@ void
 main()
 {
     vColorMask  = vColor;
+    vLocalSpace = vVSNormals.xy;
     vAtlasUVs   = vTexelData;
     InstanceID  = vTextureIndex;
 
@@ -50,6 +55,7 @@ layout(std430, binding = 0) buffer PointLightSBO
 };
 
 in vec4 vColorMask;
+in vec2 vLocalSpace;
 in vec2 vAtlasUVs;
 
 in flat uint InstanceID;
@@ -59,22 +65,26 @@ out vec4 vFragColor;
 void
 main()
 {
-    const float TileSize = 4.0;
+    const float TileSize    = 4.0;
+    const uint  TextureSize = 4096;
+    const uint  CellSize    = 256;
     
     point_light Light = PointLights[InstanceID];
-    vec2 FragPos      = gl_FragCoord.xy;
-    vec2 FragTilePos    = floor(FragPos.xy / TileSize) * TileSize + TileSize * 0.5;
 
-    vec2 LightPos     = {128, 128};
+    vec2 FragPos         = gl_FragCoord.xy;
+    vec2 LightCellCenter = floor(FragPos / CellSize) * CellSize + vec2(CellSize * 0.5);
+    vec2 FragTilePos     = floor(FragPos / TileSize) * TileSize + TileSize * 0.5;
+
+    vec2 LightPos     = FragTilePos - LightCellCenter;
     vec2 LightDir     = normalize(vec2(LightPos - FragTilePos));
     vec2 SpotlightDir = normalize(Light.Direction);
+
+    float LightDist    = length(LightPos);
+    if(LightDist > Light.Radius) return;
 
     vec2  FragToLight  = FragPos - LightPos;
     float cosTheta     = dot(SpotlightDir, normalize(FragToLight));
     float cosSpotAngle = cos(Light.SpotAngle);
-    float LightDist    = length(LightPos - FragTilePos);
-
-    if(LightDist > Light.Radius) return;
 
     float SpotEffect;
     float EdgeDelta = 0.087;
@@ -96,11 +106,10 @@ main()
         SpotEffect = pow(1 - LightDist / Light.Radius, 2.5);
     }
 
-    float SpotStrength = SpotEffect * Light.Strength;
-    vec4  LightContrib = (1.0 - exp(-0.5 * SpotStrength)) * vColorMask;
-            
-    vec4 EffectiveLightColor = LightContrib;
+    float SpotStrength        = SpotEffect * Light.Strength;
+    vec4  LightContrib        = (1.0 - exp(-0.5 * SpotStrength)) * vColorMask;
+    vec4  EffectiveLightColor = LightContrib;
 
-    vFragColor    = EffectiveLightColor;
+    vFragColor = EffectiveLightColor;
 }
 #endif

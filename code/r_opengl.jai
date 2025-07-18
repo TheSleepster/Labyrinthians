@@ -7,12 +7,15 @@ TODO(Sleepster):
 - [x] remove the old 'Light_Attenuation_Data' field from the Point_Light 
 - [x] render_options for allowing objects to remain unaffected by both ambient and point lights
 - [x] allow the user to control the angle of the light
-- [ ] Lightmap. Render all lights into a seperate texture and then mix the two textures together at the end of the final renderpass
-- [ ] stencil buffer and shadows
+- [x] Lightmap. Render all lights into a seperate texture and then mix the two textures together at the end of the final renderpass
+- [x] stencil buffer and shadows
 - [ ] Rendering Lines  
 - [ ] Functions like 'draw_quad_xform()' that would allow XForm placement
 - [ ] Resize matrices when the window changes size
 - [ ] Build a proper debug Profiler (graphs, ui, the works)
+
+LONG TERM:
+- [ ] Light and occluder groups (like render_groups) to avoid overflow
 */
 
 MAX_GROUP_VERTICES          :: 10000;
@@ -27,15 +30,16 @@ MAX_RENDER_PASSES           :: 32;
 MAX_LIGHTS_PER_TILE_CLUSTER :: 64;
 ENGINE_TEXTURE_SIZE         :: 2048;
 
-MAX_LIGHTS                  :: 256;
-MAX_OCCLUDERS               :: 2000;
+MAX_LIGHTS                  :: MAX_QUADS; 
+MAX_OCCLUDERS               :: MAX_QUADS;
 
 MAX_LIGHT_RADIUS            :: 256;
-LIGHTMAP_SIZE               :: 256;
+LIGHTMAP_SIZE               :: 4096;
 
 r_default_render_material: *Render_Material;
 
 #no_reset uploaded_debug_texture: bool = false;
+
 // TODO(Sleepster): Put this somewhere safe. 
 #no_reset ambient_factor: float32 = 0.3;
 
@@ -43,14 +47,17 @@ r_default_render_material: *Render_Material;
 Shader_Light_Data :: struct
 {
     light_color: Vector4;
+    light_mask : Vector4;
+    padding_0  : [2]float32;
+    atlas_uvs  : Vector2;
     vs_position: Vector2;
     cs_position: Vector2;
     direction  : Vector2;
     spot_angle : float32;
     radius     : float32;
     strength   : float32;
-    padding    : [3]float32;
-};
+    padding_1  : [3]float32;
+}#no_padding;
 
 Point_Light :: struct
 {
@@ -229,6 +236,7 @@ Render_State :: struct
 
     shadow_pass_shader: *GPU_Shader;
     lightmap_shader   : *GPU_Shader;
+    composite_shader  : *GPU_Shader;
 };
 
 // TODO(Sleepster): speed... 
@@ -256,8 +264,11 @@ gl_resize_SSBO :: (shader: *GPU_Shader, buffer_name: string, new_size: s64)
     {
         buffer_config.size_init = new_size;
 
+        // TODO(Sleepster): Maybe add the ability to control what the update frequency of the buffer should be...
+        // IE. add the ability to set: GL_STATIC_DRAW GL_STREAM_DRAW GL_DYNAMIC_DRAW
         glBindBuffer(GL_SHADER_STORAGE_BUFFER, buffer.location_id);
-        glBufferData(GL_SHADER_STORAGE_BUFFER, buffer_config.size_init, null, GL_DYNAMIC_DRAW);
+        glBufferData(GL_SHADER_STORAGE_BUFFER, buffer_config.size_init, null, GL_STREAM_DRAW);
+
         glBindBuffer(GL_SHADER_STORAGE_BUFFER, 0);
     }
     else
@@ -891,7 +902,7 @@ r_init_renderer_data :: (window: *SDL_Window, asset_manager: *Asset_Manager) -> 
 
             glGenBuffers(1, *primary_vbo_id);
             glBindBuffer(GL_ARRAY_BUFFER, primary_vbo_id);
-            glBufferData(GL_ARRAY_BUFFER, size_of(Vertex) * MAX_GROUP_VERTICES, null, GL_DYNAMIC_DRAW);
+            glBufferData(GL_ARRAY_BUFFER, size_of(Vertex) * MAX_GROUP_VERTICES, null, GL_STREAM_DRAW);
 
             glGenBuffers(1, *primary_ebo_id);
             glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, primary_ebo_id);
@@ -922,17 +933,18 @@ r_init_renderer_data :: (window: *SDL_Window, asset_manager: *Asset_Manager) -> 
 
     render_state.shadow_pass_shader = asset_get_shader(asset_manager, "c_shadow_map_shader");
     render_state.lightmap_shader    = asset_get_shader(asset_manager, "c_lightmap_shader");
+    render_state.composite_shader   = asset_get_shader(asset_manager, "c_composite_shader");
 
     r_default_render_material = asset_get_render_material(asset_manager, "Default_Material");
 
-    render_state.occluder2D_quad_buffer     = c_arena_push_array(*render_state.render_data_arena, Occluder2D, MAX_OCCLUDERS);
-    render_state.occluder2D_vertex_buffer   = c_arena_push_array(*render_state.render_data_arena, Vertex,     MAX_OCCLUDERS * 4);
+    render_state.occluder2D_quad_buffer    = c_arena_push_array(*render_state.render_data_arena, Occluder2D, MAX_OCCLUDERS);
+    render_state.occluder2D_vertex_buffer  = c_arena_push_array(*render_state.render_data_arena, Vertex,     MAX_OCCLUDERS * 4);
 
-    render_state.lightmap_quad_buffer       = c_arena_push_array(*render_state.render_data_arena, Render_Quad, MAX_LIGHTS);
-    render_state.lightmap_vertex_buffer     = c_arena_push_array(*render_state.render_data_arena, Vertex,      MAX_LIGHTS * 4);
+    render_state.lightmap_quad_buffer      = c_arena_push_array(*render_state.render_data_arena, Render_Quad, MAX_LIGHTS);
+    render_state.lightmap_vertex_buffer    = c_arena_push_array(*render_state.render_data_arena, Vertex,      MAX_LIGHTS * 4);
 
-    render_state.shader_point_light_buffer  = c_arena_push_array(*render_state.render_data_arena, Shader_Light_Data, MAX_LIGHTS);
-    render_state.engine_point_light_buffer  = c_arena_push_array(*render_state.render_data_arena, Point_Light, MAX_LIGHTS);
+    render_state.shader_point_light_buffer = c_arena_push_array(*render_state.render_data_arena, Shader_Light_Data, MAX_LIGHTS);
+    render_state.engine_point_light_buffer = c_arena_push_array(*render_state.render_data_arena, Point_Light, MAX_LIGHTS);
 
     render_state.update_buffer     = gl_shader_storage_buffer_object_update_buffer;
     render_state.resize_shader_buf = gl_resize_SSBO;
@@ -1117,7 +1129,7 @@ DEBUG_draw_test_sprites_experimental :: (render_state: *Render_State, asset_mana
     r_push_render_layer(render_state, 16);
 
     r_draw_quad(render_state, .{ 60, -60}, .{8, 96},  .{1, 0, 0, 1}, U32_MAX, .RO_OCCLUDER);
-    r_draw_quad(render_state, .{-60,   0}, .{16, 16}, .{1, 0, 0, 1}, U32_MAX, .RO_OCCLUDER);
+    r_draw_quad(render_state, .{-60,   0}, .{16, 16}, .{1, 0, 0, 1}, U32_MAX, .RO_OCCLUDER, deg_to_rad(45));
     r_draw_quad(render_state, .{  0,  60}, .{16, 16}, .{1, 0, 0, 1}, U32_MAX, .RO_OCCLUDER);
 
     sprite  := asset_get_sprite(asset_manager,  "player");
@@ -1134,8 +1146,15 @@ DEBUG_draw_test_sprites_experimental :: (render_state: *Render_State, asset_mana
         }
     }
 
-    r_create_point_light(render_state, .{0,  0}, .{1.0, 1.0,  1.0, 1.0}, .{1, 1}, deg_to_rad(180), 100, 2.0);
-    r_create_point_light(render_state, .{60,  0}, .{1.0, 1.0,  1.0, 1.0}, .{1, 1}, deg_to_rad(180), 100, 2.0);
+    for 0..400
+    {
+        r_create_point_light(render_state, .{ 0,    0}, .{1.0, 1.0,  1.0, 1.0}, .{1, 1}, deg_to_rad(180), 100, 2.0);
+    }
+    // r_create_point_light(render_state, .{ 60,   0}, .{1.0, 1.0,  1.0, 1.0}, .{1, 1}, deg_to_rad(180), 100, 2.0);
+    // r_create_point_light(render_state, .{-60, -20}, .{1.0, 1.0,  1.0, 1.0}, .{1, 1}, deg_to_rad(180), 100, 2.0);
+    // r_create_point_light(render_state, .{ 80,   0}, .{1.0, 1.0,  1.0, 1.0}, .{1, 1}, deg_to_rad(180), 100, 2.0);
+
+    // r_create_point_light(render_state, .{  0,  60}, .{1.0, 1.0,  1.0, 1.0}, .{1, 1}, deg_to_rad(180), 100, 2.0);
 
     default_material := asset_get_render_material(asset_manager, "Default_Material");
     
@@ -1427,6 +1446,11 @@ r_experimental_DEFERRED_rendering :: (render_state: *Render_State, asset_manager
                            cast(*void)((opaque_quad_count * 6) * size_of(u32)));
         }
     }
+
+    // NOTE(Sleepster): COMPOSITE RENDER 
+    {
+    }
+    
     glBindFramebuffer(GL_FRAMEBUFFER, 0);
     glClearColor(0.00, 0.00, 0.00, 1.0);
     glClearDepth(0.0);

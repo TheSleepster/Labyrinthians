@@ -11,13 +11,15 @@ uniform mat4 uProjectionMatrix;
 
 out vec4 vColorMask;
 out vec2 vAtlasUVs;
+out vec2 vLocalCoords;
 
 void
 main()
 {
-    vColorMask  = vColor;
-    vAtlasUVs   = vTexelData;
-    gl_Position = uProjectionMatrix * vPosition;
+    vColorMask   = vColor;
+    vAtlasUVs    = vTexelData;
+    vLocalCoords = vVSNormals.xy;
+    gl_Position  = uProjectionMatrix * vPosition;
 }
 
 #endif
@@ -26,6 +28,7 @@ main()
 
 in vec4 vColorMask;
 in vec2 vAtlasUVs;
+in vec2 vLocalCoords;
 
 out vec4 vFragColor;
 

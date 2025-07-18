@@ -299,7 +299,7 @@ r_draw_sprite :: (render_state   : *Render_State,
     }
 }
 
-// NOTE(Sleepster): Angle is in radians 
+// NOTE(Sleepster): spot_angle is in radians 
 r_create_point_light :: (render_state: *Render_State,
                          position    :  Vector2,
                          light_color :  Vector4,
@@ -503,9 +503,7 @@ DRAWING:
     for light_index: 0..render_state.draw_frame.light_count - 1
     {
         working_light := *render_state.engine_point_light_buffer[light_index];
-        working_light.light_atlas_channel_index = draw_frame.light_atlas_channel_index;
-        working_light.light_atlas_cell_index    = draw_frame.light_atlas_cell_index;
-        working_light.light_buffer_index        = light_index;
+        working_light.light_buffer_index = light_index;
 
         draw_frame.light_atlas_cell_index += 1;
         draw_frame.light_atlas_channel_index = (draw_frame.light_atlas_channel_index + 1) % 3;
@@ -548,7 +546,10 @@ DRAWING:
         cell_U: float32 = (cast(float32)cell_x * cast(float32)MAX_LIGHT_RADIUS) / LIGHTMAP_SIZE;
         cell_V: float32 = (cast(float32)cell_y * cast(float32)MAX_LIGHT_RADIUS) / LIGHTMAP_SIZE;
 
-        light_cell_scale: float32 = cast(float32)(MAX_LIGHT_RADIUS / LIGHTMAP_SIZE);
+        light_cell_scale: float32 = (cast(float32)MAX_LIGHT_RADIUS / cast(float32)LIGHTMAP_SIZE);
+
+        working_light.light_data.atlas_uvs  = .{cell_U, cell_V};
+        working_light.light_data.light_mask = .{light_mask[0], light_mask[1], light_mask[2], light_mask[3]};
 
         // NOTE(Sleepster): build the vertices 
         {
@@ -557,17 +558,17 @@ DRAWING:
             top_right_vertex    := *render_state.lightmap_vertex_buffer[render_state.draw_frame.lightmap_vertex_count + 2];
             bottom_right_vertex := *render_state.lightmap_vertex_buffer[render_state.draw_frame.lightmap_vertex_count + 3];
 
+            start_x := ((cast(float32)-LIGHTMAP_SIZE) * 0.5) + (MAX_LIGHT_RADIUS * cell_x);
+            start_y := ((cast(float32)-LIGHTMAP_SIZE) * 0.5) + (MAX_LIGHT_RADIUS * cell_y);
             // NOTE(Sleepster): World Space Position Data 
             {
-                top    := working_light.ws_position.y;
-                left   := working_light.ws_position.x - working_light.light_data.radius;
-                right  := working_light.ws_position.x + working_light.light_data.radius;
-                bottom := working_light.ws_position.y + working_light.light_data.radius;
-
-                top_left_vertex.vPosition     = .{-128,  128, 0, 1};
-                top_right_vertex.vPosition    = .{ 128,  128, 0, 1,};
-                bottom_left_vertex.vPosition  = .{-128, -128, 0, 1,};
-                bottom_right_vertex.vPosition = .{ 128, -128, 0, 1,};
+                end_x   := (start_x + MAX_LIGHT_RADIUS);
+                end_y   := (start_y + MAX_LIGHT_RADIUS);
+                
+                top_left_vertex.vPosition     = .{start_x,  start_y, 0, 1};
+                top_right_vertex.vPosition    = .{end_x,    start_y, 0, 1,};
+                bottom_left_vertex.vPosition  = .{start_x,  end_y, 0, 1,};
+                bottom_right_vertex.vPosition = .{end_x,    end_y, 0, 1,};
             }
 
             // NOTE(Sleepster): Lightmap atlas UVs
@@ -581,6 +582,19 @@ DRAWING:
                 top_right_vertex.vTexelData    = .{right_uv, top_uv};
                 bottom_left_vertex.vTexelData  = .{left_uv,  bottom_uv};
                 bottom_right_vertex.vTexelData = .{right_uv, bottom_uv};
+            }
+
+            // NOTE(Sleepster): Fragment Positions relative to light radius 
+            {
+                top_uv    := cell_V;
+                left_uv   := cell_U;
+                right_uv  := cell_U + light_cell_scale;
+                bottom_uv := cell_V + light_cell_scale;
+
+                top_left_vertex.vVSNormals     = .{left_uv,  top_uv,    0.0};
+                top_right_vertex.vVSNormals    = .{right_uv, top_uv,    0.0};
+                bottom_left_vertex.vVSNormals  = .{left_uv,  bottom_uv, 0.0};
+                bottom_right_vertex.vVSNormals = .{right_uv, bottom_uv, 0.0};
             }
 
             // NOTE(Sleepster): Light Mask 
@@ -598,6 +612,7 @@ DRAWING:
         render_state.draw_frame.lightmap_vertex_count += 4;
     }
 
+    // NOTE(Sleepster): building the silhouette of the quads for the light
     for pair_index: 0..light_occluder_pair_count - 1
     {
         light_index    := light_occluder_pairs[pair_index].light_index;
@@ -606,6 +621,7 @@ DRAWING:
         light    := *render_state.engine_point_light_buffer[light_index];
         occluder := *render_state.occluder2D_quad_buffer[occluder_index];
         assert(light != null);
+
         cell_x: u32 = light.light_atlas_cell_index % (LIGHTMAP_SIZE / MAX_LIGHT_RADIUS);
         cell_y: u32 = light.light_atlas_cell_index / (LIGHTMAP_SIZE / MAX_LIGHT_RADIUS);
 
@@ -621,56 +637,82 @@ DRAWING:
         occluder.top_right.vTexelData    = .{cell_U + light_cell_scale, cell_V};
         occluder.bottom_left.vTexelData  = .{cell_U,                    cell_V + light_cell_scale};
         occluder.bottom_right.vTexelData = .{cell_U + light_cell_scale, cell_V + light_cell_scale};
+
+        occluder.top_left.vVSNormals     = .{cell_U,                    cell_V,                    0.0};
+        occluder.top_right.vVSNormals    = .{cell_U + light_cell_scale, cell_V,                    0.0};
+        occluder.bottom_left.vVSNormals  = .{cell_U,                    cell_V + light_cell_scale, 0.0};
+        occluder.bottom_right.vVSNormals = .{cell_U + light_cell_scale, cell_V + light_cell_scale, 0.0};
+
         for *element: occluder.quad_data.elements
         {
-            element.vColor = .{light_mask.data[0], light_mask.data[1], light_mask.data[2], light_mask.data[3]};
+            element.vColor     = .{light_mask.data[0], light_mask.data[1], light_mask.data[2], light_mask.data[3]};
         }
 
-        quad_center_vector := (occluder.elements[0].vPosition.xy + occluder.elements[1].vPosition.xy +
-                               occluder.elements[2].vPosition.xy + occluder.elements[3].vPosition.xy) * vec2_create(0.25);
-
-        light_dir_from_quad_center := quad_center_vector - light.ws_position;
-        perpendicular_vector       := (Vector2).{-light_dir_from_quad_center.y, light_dir_from_quad_center.x};
-
-        vertex_dot_products: [4]float32;
-        for index: 0..4 - 1  
+        new_occluder := occluder.*;
+        for *element: new_occluder.elements
         {
-            light_vector              := occluder.elements[index].vPosition.xy - light.ws_position;
-            vertex_dot_products[index] = dot(light_vector, perpendicular_vector); 
+            element.vPosition  = v2_expand(element.vPosition.xy + light.ws_position, 0, 1);
         }
 
-        v_min_dot := min(vertex_dot_products[0], vertex_dot_products[1], vertex_dot_products[2], vertex_dot_products[3]);
-        v_max_dot := max(vertex_dot_products[0], vertex_dot_products[1], vertex_dot_products[2], vertex_dot_products[3]);
-
-        min_vertex_index: s64;
-        max_vertex_index: s64;
-        for index: 0..3
+        silhouette_cross_products: [4]float;
+        for vertex_index: 0..4 - 1
         {
-            value := vertex_dot_products[index];
-            if value == v_min_dot
+            vertex0 := occluder.elements[vertex_index].vPosition.xy;
+            vertex1 := occluder.elements[(vertex_index + 1) % 4].vPosition.xy;
+
+            edge_vector  := vertex1 - vertex0;
+            light_vector := vertex0 - light.ws_position;
+
+            silhouette_cross_products[vertex_index] = v2_cross(edge_vector, light_vector);
+        }
+
+        indices: [2]s32;
+        count  : u32;
+        for value_index: 0..4 - 1 
+        {
+            value0 := silhouette_cross_products[value_index];
+            value1 := silhouette_cross_products[(value_index - 1 + 4) % 4];
+
+            if find_sign(value0) != find_sign(value1)
             {
-                min_vertex_index = index;
-            }
-            if value == v_max_dot
-            {
-                max_vertex_index = index;
+                indices[xx count] = xx value_index;
+                count += 1;
+
+                if count == 2 break;
             }
         }
 
-        v_min := occluder.elements[min_vertex_index].vPosition.xy;
-        v_max := occluder.elements[max_vertex_index].vPosition.xy;
+        cell_offset_x := (cell_x * MAX_LIGHT_RADIUS) - (LIGHTMAP_SIZE * 0.5) + 128;
+        cell_offset_y := (cell_y * MAX_LIGHT_RADIUS) - (LIGHTMAP_SIZE * 0.5) + 128;
 
-        projection_factor := (Vector2).{100, 100};
-        v_min_proj: Vector2 = v_min + projection_factor * (v_min - light.ws_position);
-        v_max_proj: Vector2 = v_max + projection_factor * (v_max - light.ws_position);
+        cell_min_x := cell_offset_x - (MAX_LIGHT_RADIUS * 0.5);
+        cell_min_y := cell_offset_y - (MAX_LIGHT_RADIUS * 0.5);
 
-        new_occluder: Occluder2D;
-        new_occluder = occluder.*;
+        cell_max_x := cell_offset_x + (MAX_LIGHT_RADIUS * 0.5);
+        cell_max_y := cell_offset_y + (MAX_LIGHT_RADIUS * 0.5);
 
-        new_occluder.elements[0].vPosition = v2_expand(v_min, 0, 1);
-        new_occluder.elements[1].vPosition = v2_expand(v_max, 0, 1);
-        new_occluder.elements[2].vPosition = v2_expand(v_max_proj, 0, 1);
-        new_occluder.elements[3].vPosition = v2_expand(v_min_proj, 0, 1);
+        edge_vertex0 := occluder.elements[indices[0]].vPosition.xy;
+        edge_vertex1 := occluder.elements[indices[1]].vPosition.xy;
+
+        vertex0_light_dir := normalize(edge_vertex0 - light.ws_position);
+        vertex1_light_dir := normalize(edge_vertex1 - light.ws_position);
+
+        projection_factor := (Vector2).{256, 256};
+        vertex0_proj      := edge_vertex0 + (vertex0_light_dir * projection_factor);
+        vertex1_proj      := edge_vertex1 + (vertex1_light_dir * projection_factor);
+
+        edge_vertex0_pos := v2_expand((edge_vertex0 - light.ws_position) + (Vector2).{xx cell_offset_x, xx cell_offset_y}, 0, 1);
+        edge_vertex1_pos := v2_expand((edge_vertex1 - light.ws_position) + (Vector2).{xx cell_offset_x, xx cell_offset_y}, 0, 1);
+        vertex1_proj_pos := v2_expand((vertex1_proj - light.ws_position) + (Vector2).{xx cell_offset_x, xx cell_offset_y}, 0, 1);
+        vertex0_proj_pos := v2_expand((vertex0_proj - light.ws_position) + (Vector2).{xx cell_offset_x, xx cell_offset_y}, 0, 1);
+
+        vertex1_proj_clamp: Vector2 = .{clamp(vertex1_proj_pos.x, cell_min_x, cell_max_x), clamp(vertex1_proj_pos.y, cell_min_y, cell_max_y)};
+        vertex0_proj_clamp: Vector2 = .{clamp(vertex0_proj_pos.x, cell_min_x, cell_max_x), clamp(vertex0_proj_pos.y, cell_min_y, cell_max_y)};
+
+        new_occluder.elements[0].vPosition = edge_vertex0_pos;
+        new_occluder.elements[1].vPosition = edge_vertex1_pos;
+        new_occluder.elements[2].vPosition = v2_expand(vertex1_proj_clamp, 0, 1);
+        new_occluder.elements[3].vPosition = v2_expand(vertex0_proj_clamp, 0, 1);
 
         render_state.occluder2D_vertex_buffer[render_state.draw_frame.occluder_vertex_count + 0] = new_occluder.elements[0];
         render_state.occluder2D_vertex_buffer[render_state.draw_frame.occluder_vertex_count + 1] = new_occluder.elements[1];
@@ -678,8 +720,62 @@ DRAWING:
         render_state.occluder2D_vertex_buffer[render_state.draw_frame.occluder_vertex_count + 3] = new_occluder.elements[3];
 
         render_state.draw_frame.occluder_vertex_count += 4;
+
+        if render_state.draw_frame.occluder_vertex_count >= MAX_GROUP_VERTICES break;
     }
 }
+
+        // quad_center_vector := (occluder.elements[0].vPosition.xy + occluder.elements[1].vPosition.xy +
+        //                        occluder.elements[2].vPosition.xy + occluder.elements[3].vPosition.xy) * vec2_create(0.25);
+
+        // light_dir_from_quad_center := quad_center_vector - light.ws_position;
+        // perpendicular_vector       := (Vector2).{-light_dir_from_quad_center.y, light_dir_from_quad_center.x};
+
+        // vertex_dot_products: [4]float32;
+        // for index: 0..4 - 1  
+        // {
+        //     light_vector              := occluder.elements[index].vPosition.xy - light.ws_position;
+        //     vertex_dot_products[index] = dot(light_vector, perpendicular_vector); 
+        // }
+
+        // v_min_dot := min(vertex_dot_products[0], vertex_dot_products[1], vertex_dot_products[2], vertex_dot_products[3]);
+        // v_max_dot := max(vertex_dot_products[0], vertex_dot_products[1], vertex_dot_products[2], vertex_dot_products[3]);
+
+        // min_vertex_index: s64;
+        // max_vertex_index: s64;
+        // for index: 0..3
+        // {
+        //     value := vertex_dot_products[index];
+        //     if value == v_min_dot
+        //     {
+        //         min_vertex_index = index;
+        //     }
+        //     if value == v_max_dot
+        //     {
+        //         max_vertex_index = index;
+        //     }
+        // }
+
+        // v_min := occluder.elements[min_vertex_index].vPosition.xy;
+        // v_max := occluder.elements[max_vertex_index].vPosition.xy;
+
+        // projection_factor := (Vector2).{100, 100};
+        // v_min_proj: Vector2 = v_min + projection_factor * (v_min - light.ws_position);
+        // v_max_proj: Vector2 = v_max + projection_factor * (v_max - light.ws_position);
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
         // // generate the shadow quad relative to the light and add it to the vertex buffer
         // for vertex_index: 0..4 - 1
@@ -707,6 +803,3 @@ DRAWING:
         //     render_state.occluder2D_vertex_buffer[render_state.draw_frame.occluder_vertex_count + 1] = new_occluder.elements[1];
         //     render_state.occluder2D_vertex_buffer[render_state.draw_frame.occluder_vertex_count + 2] = new_occluder.elements[2];
         //     render_state.occluder2D_vertex_buffer[render_state.draw_frame.occluder_vertex_count + 3] = new_occluder.elements[3];
-
-        //     render_state.draw_frame.occluder_vertex_count += 4;
-        // }

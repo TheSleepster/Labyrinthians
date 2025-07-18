@@ -261,6 +261,23 @@ vec2_create :: inline (A: float32) -> Vector2
     return .{A, A};
 }
 
+find_sign :: (value: $T) -> s32 #expand
+{
+    if value > 0
+    {
+        return 1;
+    }
+    else
+    {
+        return -1;
+    }
+}
+
+v2_cross :: inline (A: Vector2, B: Vector2) -> float32
+{
+    return((A.x * B.y) - (A.y * B.x));
+}
+
 // min :: (A: $T, values: ..T) -> T
 // {
 //     result := A;
