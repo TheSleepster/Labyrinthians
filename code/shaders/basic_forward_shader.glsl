@@ -113,68 +113,31 @@ main()
     
     const float TileSize = 4.0;
     vec3 TotalLighting = vec3(0);
-    vec3 Specular      = vec3(0);
     if((vOutRenderingOptions & RO_UNLIT) == 0)
     {
-        const float EdgeDelta = 0.087;
         for(uint LightIndex = 0;
             LightIndex < uPointLightCount;
             ++LightIndex)
         {
             point_light Light   = PointLights[LightIndex];
+
             vec2 FragTilePos    = floor(FragPos.xy / TileSize) * TileSize + TileSize * 0.5;
             vec3 SnappedFragPos = vec3(FragTilePos, FragPos.z);
+            vec3 LightPos       = vec3(Light.vsPosition, 0.0);
+            float LightDist     = length(LightPos - SnappedFragPos);
 
-            vec3 LightPos           = vec3(Light.vsPosition, 0.0);
-            vec3 LightDir           = normalize(LightPos - SnappedFragPos);
-            vec3 SpotlightDirection = normalize(vec3(Light.Direction, 0.0));
-
-            vec3  LightToFrag       = SnappedFragPos - LightPos;
-            float cosTheta          = dot(SpotlightDirection, normalize(LightToFrag));
-            float cosSpotAngle      = cos(Light.SpotAngle);
-            float LightDist         = length(LightPos - SnappedFragPos);
             if(LightDist > Light.Radius) continue;
 
-            float SpotEffect;
-            if(Light.SpotAngle < 3.1415926535)
-            {
-                float OuterAngle    = Light.SpotAngle;
-                float InnerAngle    = max(0.0, Light.SpotAngle - EdgeDelta);
+            vec4 SampleValue    = texture(uAtlasArray[4], Light.LightAtlasUVs) * Light.LightAtlasColorMask; 
+            vec4 Alpha          = vec4(SampleValue.r + SampleValue.g + SampleValue.b + SampleValue.a);
+            vec4 TrueLightColor = Light.Color * Alpha;
 
-                float cosOuter      = cos(OuterAngle);
-                float cosInner      = cos(InnerAngle);
-
-                float AngularEffect = smoothstep(cosOuter, cosInner, cosTheta);
-                float RadialEffect  = smoothstep(Light.Radius, 0.0, LightDist);
-
-                SpotEffect = AngularEffect * RadialEffect;
-            }
-            else
-            {
-                SpotEffect = pow(1 - LightDist / Light.Radius, 2.5);
-            }
-
-            float MaxSteps    = 500.0;
-            float CurrentStep = floor((1.0 - (LightDist / Light.Radius)) * MaxSteps) / MaxSteps;
-            float Attenuation = CurrentStep * (1.0 - (LightDist / Light.Radius));
-
-            float Shine            = Material.ShineStrength == 0.0 ? 128.0 : Material.ShineStrength;
-            vec3  ReflectDir       = reflect(-LightDir, Normal);
-            float SpecularLighting = pow(max(dot(Normal, ReflectDir), 0.0), Shine);
-
-            float SpotStrength = SpotEffect * Light.Strength;
-            vec3  LightContrib = (1.0 - exp(-0.5 * SpotStrength)) * Light.Color.rgb;
-            
-            vec3 EffectiveLightColor = LightContrib;
-            vec3 AdditiveLighting    = EffectiveLightColor * Attenuation;
-
-            TotalLighting += EffectiveLightColor;
-            Specular      += 0.5 * SpecularLighting * Light.Color.rgb;
+            TotalLighting      += TrueLightColor.rgb;
         }
 
-        vec3 Color    = DiffuseColor.rgb;
-        vec3 LitColor = Color * AmbientLight + (1.0 - Color) * TotalLighting;
-        vFragColor    = vec4(LitColor, DiffuseColor.a);
+        vec4 Color    = DiffuseColor.rgba;
+        vec3 LitColor = Color.rgb * AmbientLight + (1.0 - Color.rgb) * TotalLighting;
+        vFragColor    = vec4(LitColor, Color.a);
     }
     else
     {

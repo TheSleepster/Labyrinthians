@@ -26,47 +26,46 @@ layout(location = 4) in uint vRenderingOptions;
 layout(location = 5) in uint vTextureIndex;
 layout(location = 6) in uint vRenderLayer;
 
-uniform mat4 uProjectionMatrix;
-
-out flat uint InstanceID;
-
-void
-main()
-{
-    InstanceID  = vTextureIndex;
-    gl_Position = uProjectionMatrix * vPosition;
-}
-#endif
-
-#ifdef FRAGMENT_SHADER
 layout(std430, binding = 0) buffer PointLightSBO
 {
     point_light PointLights[];
 };
-uniform uint uPointLightCount;
 
+uniform mat4 uProjectionMatrix;
+
+out flat uint InstanceID;
+out      vec4 vColorMask;
+out      vec4 vLightColor;
+out      vec2 vLightAtlasUVs;
+
+void
+main()
+{
+    point_light Light = PointLights[vTextureIndex];
+
+    vColorMask     = Light.LightAtlasColorMask;
+    vLightColor    = Light.Color;
+    vLightAtlasUVs = vTexelData;
+    gl_Position    = uProjectionMatrix * vPosition;
+}
+#endif
+
+#ifdef FRAGMENT_SHADER
 layout(binding = 0) uniform sampler2D uShadowMap;
 
+in      vec4 vColorMask;
+in      vec4 vLightColor;
+in      vec2 vLightAtlasUVs;
 in flat uint InstanceID;
+
 out vec4 vFragColor;
 
 void
 main()
 {
-    vec4 TotalColor;
-    for(uint LightIndex = 0;
-        LightIndex < uPointLightCount;
-        ++LightIndex)
-    {
-        point_light Light = PointLights[LightIndex];
+    vec4 SampleValue  = texture(uShadowMap, vLightAtlasUVs) * vColorMask;
+    vec4 Alpha        = vec4(SampleValue.r + SampleValue.g + SampleValue.b + SampleValue.a);
 
-        vec4 ColorMask    = Light.LightAtlasColorMask;
-        vec4 SampleValue  = texture(uShadowMap, Light.LightAtlasUVs) * ColorMask;
-        vec4 Alpha        = vec4(SampleValue.r + SampleValue.g + SampleValue.b + SampleValue.a);
-
-        TotalColor += Light.Color * Alpha;
-    }
-
-    vFragColor = TotalColor;
+    vFragColor = vLightColor * Alpha;
 }
 #endif

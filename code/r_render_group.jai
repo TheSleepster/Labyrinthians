@@ -80,11 +80,17 @@ r_create_new_render_group :: (render_state           : *Render_State,
 
     draw_frame := *render_state.draw_frame;
     hash_render_group.* = .{};
-    hash_render_group.view_matrix         = draw_frame.used_view_matrices[working_quad.quad_render_matrix_id];
-    hash_render_group.projection_matrix   = draw_frame.used_projection_matrices[working_quad.quad_render_matrix_id];
-    hash_render_group.bound_shader        = working_quad.required_shader;
-    hash_render_group.stored_render_layer = working_quad.render_layer;
-    hash_render_group.bound_material      = working_quad.required_render_material;
+    hash_render_group.view_matrix          = draw_frame.used_view_matrices[working_quad.quad_render_matrix_id];
+    hash_render_group.projection_matrix    = draw_frame.used_projection_matrices[working_quad.quad_render_matrix_id];
+    hash_render_group.bound_shader         = working_quad.required_shader;
+    hash_render_group.stored_render_layer  = working_quad.render_layer;
+    hash_render_group.bound_material       = working_quad.required_render_material;
+
+    // TODO(Sleepster): Is this REALLY what we want here? Not all
+    // render_groups will make use of it, and a 4kx4k texture is
+    // expensive to bind
+    hash_render_group.texture_ids[0]       = render_state.sfb_lightmap;
+    hash_render_group.group_texture_count += 1;
 
     // TODO(Sleepster): Is this an issue??? Likely not. It's only 150KB per MAX_QUADS...
     hash_render_group.quad_render_buffer = c_arena_push_array(*render_state.draw_frame_arena, Render_Quad, MAX_QUADS);

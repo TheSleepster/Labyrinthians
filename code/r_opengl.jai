@@ -234,6 +234,14 @@ Render_State :: struct
     update_uniform   : (shader: *GPU_Shader, uniform_name: string, data    : *void);
     update_UBO       : (shader: *GPU_Shader, UBO_name    : string, data    : *void);
 
+
+    framebuffer_id   : u32;
+    ffb_rgba_texture : u32;
+    ffb_depth_texture: u32;
+
+    s_framebuffer_id: u32;
+    sfb_lightmap    : u32;
+
     shadow_pass_shader: *GPU_Shader;
     lightmap_shader   : *GPU_Shader;
     composite_shader  : *GPU_Shader;
@@ -835,6 +843,28 @@ r_update_gpu_texture_from_bitmap :: (texture: *Texture2D) -> bool
     return true;
 }
 
+r_set_vertex_attributes :: ()
+{
+    T :: Vertex;
+    offset: *T: null;
+    glVertexAttribPointer(0, 4, GL_FLOAT, GL_FALSE, size_of(Vertex), xx *offset.vPosition);
+    glVertexAttribPointer(1, 4, GL_FLOAT, GL_FALSE, size_of(Vertex), xx *offset.vColor);
+    glVertexAttribPointer(2, 3, GL_FLOAT, GL_FALSE, size_of(Vertex), xx *offset.vVSNormals);
+    glVertexAttribPointer(3, 2, GL_FLOAT, GL_FALSE, size_of(Vertex), xx *offset.vTexelData);
+
+    glVertexAttribIPointer(4, 1, GL_UNSIGNED_INT, size_of(Vertex), xx *offset.vRenderOptions);
+    glVertexAttribIPointer(5, 1, GL_UNSIGNED_INT, size_of(Vertex), xx *offset.vTextureIndex);
+    glVertexAttribIPointer(6, 1, GL_UNSIGNED_INT, size_of(Vertex), xx *offset.vRenderLayer);
+    
+    glEnableVertexAttribArray(0);
+    glEnableVertexAttribArray(1);
+    glEnableVertexAttribArray(2);
+    glEnableVertexAttribArray(3);
+    glEnableVertexAttribArray(4);
+    glEnableVertexAttribArray(5);
+    glEnableVertexAttribArray(6);
+}
+
 r_init_renderer_data :: (window: *SDL_Window, asset_manager: *Asset_Manager) -> Render_State
 {
     // NOTE(Sleepster): GL State Init 
@@ -897,37 +927,21 @@ r_init_renderer_data :: (window: *SDL_Window, asset_manager: *Asset_Manager) -> 
         // NOTE(Sleepster): OpenGL state init 
         {
             using render_state;
-            glGenVertexArrays(1, *primary_vao_id);
-            glBindVertexArray(primary_vao_id);
+            // FIRST
+            {
+                glGenVertexArrays(1, *primary_vao_id);
+                glBindVertexArray(primary_vao_id);
 
-            glGenBuffers(1, *primary_vbo_id);
-            glBindBuffer(GL_ARRAY_BUFFER, primary_vbo_id);
-            glBufferData(GL_ARRAY_BUFFER, size_of(Vertex) * MAX_GROUP_VERTICES, null, GL_STREAM_DRAW);
+                glGenBuffers(1, *primary_vbo_id);
+                glBindBuffer(GL_ARRAY_BUFFER, primary_vbo_id);
+                glBufferData(GL_ARRAY_BUFFER, size_of(Vertex) * MAX_GROUP_VERTICES, null, GL_STREAM_DRAW);
 
-            glGenBuffers(1, *primary_ebo_id);
-            glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, primary_ebo_id);
-            glBufferData(GL_ELEMENT_ARRAY_BUFFER, size_of(u32) * MAX_QUAD_INDICES, quad_index_buffer.data, GL_STATIC_DRAW);
+                glGenBuffers(1, *primary_ebo_id);
+                glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, primary_ebo_id);
+                glBufferData(GL_ELEMENT_ARRAY_BUFFER, size_of(u32) * MAX_QUAD_INDICES, quad_index_buffer.data, GL_STATIC_DRAW);
 
-            T :: Vertex;
-            offset: *T: null;
-            glVertexAttribPointer(0, 4, GL_FLOAT, GL_FALSE, size_of(Vertex), xx *offset.vPosition);
-            glVertexAttribPointer(1, 4, GL_FLOAT, GL_FALSE, size_of(Vertex), xx *offset.vColor);
-            glVertexAttribPointer(2, 3, GL_FLOAT, GL_FALSE, size_of(Vertex), xx *offset.vVSNormals);
-            glVertexAttribPointer(3, 2, GL_FLOAT, GL_FALSE, size_of(Vertex), xx *offset.vTexelData);
-
-            glVertexAttribIPointer(4, 1, GL_UNSIGNED_INT, size_of(Vertex), xx *offset.vRenderOptions);
-            glVertexAttribIPointer(5, 1, GL_UNSIGNED_INT, size_of(Vertex), xx *offset.vTextureIndex);
-            glVertexAttribIPointer(6, 1, GL_UNSIGNED_INT, size_of(Vertex), xx *offset.vRenderLayer);
-            
-            glEnableVertexAttribArray(0);
-            glEnableVertexAttribArray(1);
-            glEnableVertexAttribArray(2);
-            glEnableVertexAttribArray(3);
-            glEnableVertexAttribArray(4);
-            glEnableVertexAttribArray(5);
-            glEnableVertexAttribArray(6);
-
-            glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, 0);
+                r_set_vertex_attributes();
+            }
         }
     }
 
@@ -1122,7 +1136,7 @@ DEBUG_draw_test_sprites_experimental :: (render_state: *Render_State, asset_mana
                                                                                        320 *  0.5,
                                                                                        180 * -0.5,
                                                                                        180 *  0.5,
-                                                                                       -1.0,
+                                                                                      -1.0,
                                                                                        1.0);
     r_push_render_layer(render_state, 17);
     r_draw_quad(render_state, .{-300,-160}, .{640, 360}, .{0.01, 0.01, 0.01, 1});
@@ -1146,10 +1160,7 @@ DEBUG_draw_test_sprites_experimental :: (render_state: *Render_State, asset_mana
         }
     }
 
-    for 0..400
-    {
-        r_create_point_light(render_state, .{ 0,    0}, .{1.0, 1.0,  1.0, 1.0}, .{1, 1}, deg_to_rad(180), 100, 2.0);
-    }
+    r_create_point_light(render_state, .{ 0,    0}, .{1.0, 1.0,  1.0, 1.0}, .{1, 1}, deg_to_rad(180), 100, 2.0);
     // r_create_point_light(render_state, .{ 60,   0}, .{1.0, 1.0,  1.0, 1.0}, .{1, 1}, deg_to_rad(180), 100, 2.0);
     // r_create_point_light(render_state, .{-60, -20}, .{1.0, 1.0,  1.0, 1.0}, .{1, 1}, deg_to_rad(180), 100, 2.0);
     // r_create_point_light(render_state, .{ 80,   0}, .{1.0, 1.0,  1.0, 1.0}, .{1, 1}, deg_to_rad(180), 100, 2.0);
@@ -1242,13 +1253,6 @@ r_render_group_test_render :: (render_state: *Render_State, asset_manager: *Asse
     }
 }
 
-framebuffer_id   : u32;
-ffb_rgba_texture : u32;
-ffb_depth_texture: u32;
-
-s_framebuffer_id: u32;
-sfb_lightmap    : u32;
-
 #no_reset experimental_init: bool = false;
 r_experimental_DEFERRED_rendering :: (render_state: *Render_State, asset_manager: *Asset_Manager)
 {
@@ -1259,11 +1263,11 @@ r_experimental_DEFERRED_rendering :: (render_state: *Render_State, asset_manager
     {
         // NOTE(Sleepster): MAIN FRAMEBUFFER 
         {
-            glGenFramebuffers(1, *framebuffer_id);
-            glBindFramebuffer(GL_FRAMEBUFFER, framebuffer_id);
+            glGenFramebuffers(1, *render_state.framebuffer_id);
+            glBindFramebuffer(GL_FRAMEBUFFER, render_state.framebuffer_id);
 
-            glGenTextures(1, *ffb_rgba_texture);
-            glBindTexture(GL_TEXTURE_2D, ffb_rgba_texture);
+            glGenTextures(1, *render_state.ffb_rgba_texture);
+            glBindTexture(GL_TEXTURE_2D, render_state.ffb_rgba_texture);
 
             glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
             glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
@@ -1275,8 +1279,8 @@ r_experimental_DEFERRED_rendering :: (render_state: *Render_State, asset_manager
                          render_engine_width, render_engine_height, 0, 
                          GL_RGBA, GL_UNSIGNED_BYTE, null);
 
-            glGenTextures(1, *ffb_depth_texture);
-            glBindTexture(GL_TEXTURE_2D, ffb_depth_texture);
+            glGenTextures(1, *render_state.ffb_depth_texture);
+            glBindTexture(GL_TEXTURE_2D, render_state.ffb_depth_texture);
 
             glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
             glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
@@ -1288,44 +1292,49 @@ r_experimental_DEFERRED_rendering :: (render_state: *Render_State, asset_manager
                          GL_DEPTH_COMPONENT, GL_UNSIGNED_BYTE, null);
 
 
-            glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, ffb_rgba_texture, 0);
-            glFramebufferTexture2D(GL_FRAMEBUFFER, GL_DEPTH_ATTACHMENT,  GL_TEXTURE_2D, ffb_depth_texture, 0);
+            glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, render_state.ffb_rgba_texture, 0);
+            glFramebufferTexture2D(GL_FRAMEBUFFER, GL_DEPTH_ATTACHMENT,  GL_TEXTURE_2D, render_state.ffb_depth_texture, 0);
             draw_buffers: []GLenum = .[GL_COLOR_ATTACHMENT0];
             glDrawBuffers(1, draw_buffers.data);
         }
 
         // NOTE(Sleepster): LIGHTING FRAMEBUFFER
         {
-            glGenFramebuffers(1, *s_framebuffer_id);
-            glBindFramebuffer(GL_FRAMEBUFFER, s_framebuffer_id);
+            glGenFramebuffers(1, *render_state.s_framebuffer_id);
+            glBindFramebuffer(GL_FRAMEBUFFER, render_state.s_framebuffer_id);
 
-            glGenTextures(1, *sfb_lightmap);
-            glBindTexture(GL_TEXTURE_2D, sfb_lightmap);
+            glGenTextures(1, *render_state.sfb_lightmap);
+            glBindTexture(GL_TEXTURE_2D, render_state.sfb_lightmap);
 
             glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
             glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+
             glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
             glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
 
             glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA8, 
                          LIGHTMAP_SIZE, LIGHTMAP_SIZE, 0, 
-                         GL_RGB, GL_FLOAT, null);
+                         GL_RGBA, GL_UNSIGNED_BYTE, null);
 
 
-            glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, sfb_lightmap, 0);
+            glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, render_state.sfb_lightmap, 0);
         }
 
         experimental_init = true;
     }
-    glBindVertexArray(render_state.primary_vao_id);
     glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, render_state.primary_ebo_id);
 
     r_handle_lighting_data(render_state);
     // NOTE(Sleepster): Shadow and lighting pass 
     {
-        glBindFramebuffer(GL_FRAMEBUFFER, s_framebuffer_id);
+        glBindFramebuffer(GL_FRAMEBUFFER, render_state.s_framebuffer_id);
         glClearColor(0.0, 0.0, 0.0, 0.0);
         glClear(GL_COLOR_BUFFER_BIT);
+
+        glBindTexture(GL_TEXTURE_2D, render_state.sfb_lightmap);
+        clear_color: [4]float32 = .[0.0, 0.0, 0.0, 0.0];
+        glClearTexImage(render_state.sfb_lightmap, 0, GL_RGBA, GL_UNSIGNED_BYTE, clear_color.data);
+        glBindTexture(GL_TEXTURE_2D, 0);
 
         glViewport(0, 0, LIGHTMAP_SIZE, LIGHTMAP_SIZE);
 
@@ -1348,6 +1357,7 @@ r_experimental_DEFERRED_rendering :: (render_state: *Render_State, asset_manager
             glBlendFunc(GL_ONE, GL_ONE);
             glBlendEquation(GL_FUNC_ADD);
             
+            glBindVertexArray(render_state.primary_vao_id);
             glBindBuffer(GL_ARRAY_BUFFER, render_state.primary_vbo_id);
             glBufferSubData(GL_ARRAY_BUFFER,
                             0,
@@ -1363,8 +1373,8 @@ r_experimental_DEFERRED_rendering :: (render_state: *Render_State, asset_manager
                                        size_of(Shader_Light_Data) * render_state.draw_frame.light_count,
                                        render_state.shader_point_light_buffer.data);
 
+            glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, render_state.primary_ebo_id);
             r_update_shader_data(null, render_state.lightmap_shader);
-            
             glDrawElements(GL_TRIANGLES,
                            render_state.draw_frame.light_count * 6,
                            GL_UNSIGNED_INT,
@@ -1387,6 +1397,7 @@ r_experimental_DEFERRED_rendering :: (render_state: *Render_State, asset_manager
                                        "uProjectionMatrix",
                                        *atlas_proj_matrix._11);
 
+            glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, render_state.primary_ebo_id);
             r_update_shader_data(null, render_state.shadow_pass_shader);
             glDrawElements(GL_TRIANGLES,
                            (render_state.draw_frame.occluder_vertex_count / 4) * 6,
@@ -1395,7 +1406,7 @@ r_experimental_DEFERRED_rendering :: (render_state: *Render_State, asset_manager
         }
     }
 
-    glBindFramebuffer(GL_FRAMEBUFFER, framebuffer_id);
+    glBindFramebuffer(GL_FRAMEBUFFER, render_state.framebuffer_id);
 
     glViewport(0, 0, render_engine_width, render_engine_height);
     glClearColor(0.0, 0.0, 0.0, 1.0);
@@ -1404,8 +1415,11 @@ r_experimental_DEFERRED_rendering :: (render_state: *Render_State, asset_manager
     glEnable(GL_DEPTH_TEST);
     glClear(GL_COLOR_BUFFER_BIT|GL_DEPTH_BUFFER_BIT);
 
+    // glBlendEquation(GL_FUNC_ADD);
+    // glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+
     glBlendEquation(GL_FUNC_ADD);
-    glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+    glBlendFunc(GL_ONE, GL_ONE);
 
     glDepthFunc(GL_GREATER);
     glDepthMask(GL_TRUE);
@@ -1447,17 +1461,13 @@ r_experimental_DEFERRED_rendering :: (render_state: *Render_State, asset_manager
         }
     }
 
-    // NOTE(Sleepster): COMPOSITE RENDER 
-    {
-    }
-    
     glBindFramebuffer(GL_FRAMEBUFFER, 0);
     glClearColor(0.00, 0.00, 0.00, 1.0);
     glClearDepth(0.0);
     glClear(GL_COLOR_BUFFER_BIT|GL_DEPTH_BUFFER_BIT);
 
     glBindFramebuffer(GL_DRAW_FRAMEBUFFER, 0);
-    glBindFramebuffer(GL_READ_FRAMEBUFFER, framebuffer_id);
+    glBindFramebuffer(GL_READ_FRAMEBUFFER, render_state.framebuffer_id);
     glBlitFramebuffer(0,
                       0,
                    xx render_engine_width,

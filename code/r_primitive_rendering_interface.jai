@@ -536,9 +536,6 @@ DRAWING:
     {
         working_light := *render_state.engine_point_light_buffer[light_index];
 
-        light_mask: [4]float32;
-        light_mask.data[working_light.light_atlas_channel_index] = 1.0;
-
         // NOTE(Sleepster): Compute light atlas data
         cell_x: u32 = working_light.light_atlas_cell_index % (LIGHTMAP_SIZE / MAX_LIGHT_RADIUS);
         cell_y: u32 = working_light.light_atlas_cell_index / (LIGHTMAP_SIZE / MAX_LIGHT_RADIUS);
@@ -547,6 +544,9 @@ DRAWING:
         cell_V: float32 = (cast(float32)cell_y * cast(float32)MAX_LIGHT_RADIUS) / LIGHTMAP_SIZE;
 
         light_cell_scale: float32 = (cast(float32)MAX_LIGHT_RADIUS / cast(float32)LIGHTMAP_SIZE);
+
+        light_mask: [4]float32;
+        light_mask.data[working_light.light_atlas_channel_index] = 1.0;
 
         working_light.light_data.atlas_uvs  = .{cell_U, cell_V};
         working_light.light_data.light_mask = .{light_mask[0], light_mask[1], light_mask[2], light_mask[3]};
@@ -560,7 +560,7 @@ DRAWING:
 
             start_x := ((cast(float32)-LIGHTMAP_SIZE) * 0.5) + (MAX_LIGHT_RADIUS * cell_x);
             start_y := ((cast(float32)-LIGHTMAP_SIZE) * 0.5) + (MAX_LIGHT_RADIUS * cell_y);
-            // NOTE(Sleepster): World Space Position Data 
+            // NOTE(Sleepster): Lightmap Space Position Data 
             {
                 end_x   := (start_x + MAX_LIGHT_RADIUS);
                 end_y   := (start_y + MAX_LIGHT_RADIUS);
