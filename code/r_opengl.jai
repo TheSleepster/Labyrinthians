@@ -1112,6 +1112,7 @@ DEBUG_draw_test_sprites :: (render_state: *Render_State, asset_manager: *Asset_M
     render_state.update_uniform(render_state.draw_frame.active_shader,
                                "uAmbientLighting",
                                *ambient_factor);
+
     render_state.update_buffer(render_state.draw_frame.active_shader,
                               "PointLightSBO",
                                size_of(Shader_Light_Data) * render_state.draw_frame.light_count,
@@ -1143,8 +1144,9 @@ DEBUG_draw_test_sprites_experimental :: (render_state: *Render_State, asset_mana
     r_push_render_layer(render_state, 16);
 
     r_draw_quad(render_state, .{ 60, -60}, .{8, 96},  .{1, 0, 0, 1}, U32_MAX, .RO_OCCLUDER);
-    r_draw_quad(render_state, .{-60,   0}, .{16, 16}, .{1, 0, 0, 1}, U32_MAX, .RO_OCCLUDER, deg_to_rad(45));
+    r_draw_quad(render_state, .{-60,   0}, .{16, 16}, .{1, 0, 0, 1}, U32_MAX, .RO_OCCLUDER);
     r_draw_quad(render_state, .{  0,  60}, .{16, 16}, .{1, 0, 0, 1}, U32_MAX, .RO_OCCLUDER);
+    r_draw_quad(render_state, .{ -2,  -2}, .{ 4,  4}, .{1, 0, 0, 1}, U32_MAX, .RO_UNLIT);
 
     sprite  := asset_get_sprite(asset_manager,  "player");
     texture := asset_get_texture(asset_manager, "player");
@@ -1162,7 +1164,7 @@ DEBUG_draw_test_sprites_experimental :: (render_state: *Render_State, asset_mana
 
     r_create_point_light(render_state, .{ 0,    0}, .{1.0, 1.0,  1.0, 1.0}, .{1, 1}, deg_to_rad(180), 100, 2.0);
     // r_create_point_light(render_state, .{ 60,   0}, .{1.0, 1.0,  1.0, 1.0}, .{1, 1}, deg_to_rad(180), 100, 2.0);
-    // r_create_point_light(render_state, .{-60, -20}, .{1.0, 1.0,  1.0, 1.0}, .{1, 1}, deg_to_rad(180), 100, 2.0);
+    r_create_point_light(render_state, .{-60, -20}, .{1.0, 0.0,  1.0, 1.0}, .{1, 1}, deg_to_rad(180), 100, 2.0);
     // r_create_point_light(render_state, .{ 80,   0}, .{1.0, 1.0,  1.0, 1.0}, .{1, 1}, deg_to_rad(180), 100, 2.0);
 
     // r_create_point_light(render_state, .{  0,  60}, .{1.0, 1.0,  1.0, 1.0}, .{1, 1}, deg_to_rad(180), 100, 2.0);
@@ -1185,6 +1187,7 @@ DEBUG_draw_test_sprites_experimental :: (render_state: *Render_State, asset_mana
     render_state.update_uniform(render_state.draw_frame.active_shader,
                                "uAmbientLighting",
                                *ambient_factor);
+
     render_state.update_buffer(render_state.draw_frame.active_shader,
                               "PointLightSBO",
                                size_of(Shader_Light_Data) * render_state.draw_frame.light_count,
@@ -1337,13 +1340,6 @@ r_experimental_DEFERRED_rendering :: (render_state: *Render_State, asset_manager
         glBindTexture(GL_TEXTURE_2D, 0);
 
         glViewport(0, 0, LIGHTMAP_SIZE, LIGHTMAP_SIZE);
-
-        /*
-            TODO:
-            Render the lighting using glDrawElementsInstanced for each light. (an Instance per light)
-            Then cut out the shadows for the specific color mask.
-        */
-
         atlas_proj_matrix := orthographic_projection_matrix(LIGHTMAP_SIZE * -0.5,
                                                             LIGHTMAP_SIZE *  0.5,
                                                             LIGHTMAP_SIZE * -0.5,
@@ -1415,11 +1411,11 @@ r_experimental_DEFERRED_rendering :: (render_state: *Render_State, asset_manager
     glEnable(GL_DEPTH_TEST);
     glClear(GL_COLOR_BUFFER_BIT|GL_DEPTH_BUFFER_BIT);
 
-    // glBlendEquation(GL_FUNC_ADD);
-    // glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
-
     glBlendEquation(GL_FUNC_ADD);
-    glBlendFunc(GL_ONE, GL_ONE);
+    glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+
+    // glBlendEquation(GL_FUNC_ADD);
+    // glBlendFunc(GL_ONE, GL_ONE);
 
     glDepthFunc(GL_GREATER);
     glDepthMask(GL_TRUE);

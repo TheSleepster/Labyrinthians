@@ -119,16 +119,20 @@ main()
             LightIndex < uPointLightCount;
             ++LightIndex)
         {
-            point_light Light   = PointLights[LightIndex];
+            point_light Light = PointLights[LightIndex];
 
-            vec2 FragTilePos    = floor(FragPos.xy / TileSize) * TileSize + TileSize * 0.5;
-            vec3 SnappedFragPos = vec3(FragTilePos, FragPos.z);
-            vec3 LightPos       = vec3(Light.vsPosition, 0.0);
-            float LightDist     = length(LightPos - SnappedFragPos);
+            vec3  LightPos  = vec3(Light.vsPosition, 0.0);
+            float LightDist = length(LightPos - FragPos.xyz);
 
-            if(LightDist > Light.Radius) continue;
+            vec2  HalfTexel = vec2(0.5/4096.0);
+            vec2  Offset    = FragPos.xy - LightPos.xy;
+            vec2  LocalUV   = (Offset / Light.Radius) * 0.5 + 0.5;
+            float CellScale = ((Light.Radius * 2) / 4096.0);
 
-            vec4 SampleValue    = texture(uAtlasArray[4], Light.LightAtlasUVs) * Light.LightAtlasColorMask; 
+            float IDontKnowWhyThisConstantWorks = 0.14;
+            vec2  AtlasUV   = (Light.LightAtlasUVs + (LocalUV * CellScale)) + (CellScale * IDontKnowWhyThisConstantWorks);
+
+            vec4 SampleValue    = texture(uAtlasArray[5], AtlasUV) * Light.LightAtlasColorMask; 
             vec4 Alpha          = vec4(SampleValue.r + SampleValue.g + SampleValue.b + SampleValue.a);
             vec4 TrueLightColor = Light.Color * Alpha;
 
@@ -137,7 +141,7 @@ main()
 
         vec4 Color    = DiffuseColor.rgba;
         vec3 LitColor = Color.rgb * AmbientLight + (1.0 - Color.rgb) * TotalLighting;
-        vFragColor    = vec4(LitColor, Color.a);
+        vFragColor    = vec4(LitColor, 1.0);
     }
     else
     {
