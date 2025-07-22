@@ -123,6 +123,7 @@ main()
 
             vec3  LightPos  = vec3(Light.vsPosition, 0.0);
             float LightDist = length(LightPos - FragPos.xyz);
+            if(LightDist > (Light.Radius - 2)) continue;
 
             vec2  HalfTexel = vec2(0.5/4096.0);
             vec2  Offset    = FragPos.xy - LightPos.xy;
