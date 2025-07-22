@@ -42,6 +42,86 @@ Render_Group_Line_Buffer :: struct
     next_buffer  : *Render_Group_Line_Buffer;
 };
 
+/*
+* TODO(Sleepster): 
+* PROBLEM:
+*
+* We have a problem with the initial philosophy of this renderer. The
+* problem is that although we can control things like what shader is
+* applied to the contents of the render group we cannot control what
+* effects get applied to the render_group itself. We also only group
+* quads by their required shaders when we should be grouping them by
+* their required effects. Since I thought about it, it makes no sense
+* for quads that take on lighting effects to be rendered with quads
+* that don't want any such effect. It just leads to a conflict of
+* interest. 
+*
+* GOAL:
+*
+* Group data differently, currnently we group quads by their required
+* textures or shaders. Instead we need to group them by effects. We
+* whould also give the user more control over how the rendering
+* currently works and modify the api to take a new approach, one that
+* expands the api into allowing us to create render_passes that
+* control what effects are applied and how. Create something like a
+* render_pass_desc that contains the information needed to properly
+* render items appropriately.
+*
+* SOLUTION:
+*
+* 1.) ---Modify how render_groups store data, and how that data is grouped---
+*     
+*     Instead of storing the quads in a quad_buffer that uses a
+*     linked list to support an infinite amount of quads for all
+*     rendering passes, why not just bake these quad_buffers into the
+*     render groups themselves using calls like "begin_render_pass"
+*     and "end_render_pass" to allow us to effectively store the
+*     quads as part of the render group. This will not only save us CPU time
+*     sorting the quads into the correct group since they are already
+*     in the group that they need to be inside of but also allow us to use
+*     runtime error checking to make sure that a quad that you insert
+*     into the quad buffer of a render_group matches the rest of the
+*     data for the render_pass.
+*
+* 2.) ---Consider batching by effect and along with the required shader. Handling effects needed later in the pipeline---
+*     
+*     Allow the user to create a render_group and supply a
+*     "render_pass_desc" that will allow us to label the render_pass with
+*     effect data like "RE_Lighting" or "RE_Bloom" or let the user
+*     change the blend_mode for that specific draw call. This would
+*     give the user more control and would expand the settings that we
+*     currently allow. Settings like these would also allow us to
+*     change how our rendering currently happens since we could just
+*     apply the effects in a seperate in-engine pass that simply would
+*     build on top of the data the user provides.
+*
+* 3.) ---Create the custom in-engine passes to act upon the data as desired by the render_pass_desc---
+*     
+*     Once the rendering of all passes is complete, we iterate through all
+*     the render_groups to find out which of the effects and how many
+*     effects each render_group wants applied to the geometry they
+*     store. Then we will perform the post processing on their data as
+*     requested once at the very end of the pipeline, thus gracefully
+*     and efficiently handling the desired effects in a way that
+*     doesn't cause nearly as much overdraw as the methods we
+*     currently employ in our shaders while also allowing us to create
+*     custom "bloom_pass.glsl" shaders and also allows the user to
+*     slightly modify these shaders if they so desire while expanding
+*     and upgrading the pipeline significantly while preventing the
+*     current problem of shader handling.
+* 
+* RUNTIME ERROR CHECKING FOR GROUPS:
+* - When adding an item to a render_group make sure the effect bits
+*   support what we are currently attempting to render.
+*
+*
+* BONUS:
+* 
+* - MULTITHREADING
+*      Perhaps when we transfer the vertices from the quad buffer -> render_group's vertex buffer 
+*      we could parallelize it to work on multiple groups at once using a job system.
+*/
+
 Render_Group :: struct
 {
     group_id: u32;

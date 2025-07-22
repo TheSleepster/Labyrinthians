@@ -10,7 +10,6 @@ TODO(Sleepster):
 - [x] Lightmap. Render all lights into a seperate texture and then mix the two textures together at the end of the final renderpass
 - [x] stencil buffer and shadows
 - [ ] Rendering Lines  
-- [ ] Functions like 'draw_quad_xform()' that would allow XForm placement
 - [ ] Resize matrices when the window changes size
 - [ ] Build a proper debug Profiler (graphs, ui, the works)
 
@@ -1164,7 +1163,7 @@ DEBUG_draw_test_sprites_experimental :: (render_state: *Render_State, asset_mana
 
     r_create_point_light(render_state, .{ 0,    0}, .{1.0, 1.0,  1.0, 1.0}, .{1, 1}, deg_to_rad(180), 100, 2.0);
     // r_create_point_light(render_state, .{ 60,   0}, .{1.0, 1.0,  1.0, 1.0}, .{1, 1}, deg_to_rad(180), 100, 2.0);
-    r_create_point_light(render_state, .{-60, -20}, .{1.0, 0.0,  1.0, 1.0}, .{1, 1}, deg_to_rad(180), 100, 2.0);
+    //r_create_point_light(render_state, .{-60, -20}, .{1.0, 0.0,  1.0, 1.0}, .{1, 1}, deg_to_rad(180), 100, 2.0);
     // r_create_point_light(render_state, .{ 80,   0}, .{1.0, 1.0,  1.0, 1.0}, .{1, 1}, deg_to_rad(180), 100, 2.0);
 
     // r_create_point_light(render_state, .{  0,  60}, .{1.0, 1.0,  1.0, 1.0}, .{1, 1}, deg_to_rad(180), 100, 2.0);
