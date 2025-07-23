@@ -65,7 +65,10 @@ Render_Group_Line_Buffer :: struct
 * expands the api into allowing us to create render_passes that
 * control what effects are applied and how. Create something like a
 * render_pass_desc that contains the information needed to properly
-* render items appropriately.
+* render items appropriately. All the rendering is done in a "deferred
+* way" where these render_groups (or render_passes) are meant to store
+* the data intermediately about how items should be rendered so that
+* they can LATER be rendered using the OpenGL backend later.
 *
 * SOLUTION:
 *
@@ -109,6 +112,7 @@ Render_Group_Line_Buffer :: struct
 *     slightly modify these shaders if they so desire while expanding
 *     and upgrading the pipeline significantly while preventing the
 *     current problem of shader handling.
+*  
 * 
 * RUNTIME ERROR CHECKING FOR GROUPS:
 * - When adding an item to a render_group make sure the effect bits
@@ -116,10 +120,123 @@ Render_Group_Line_Buffer :: struct
 *
 *
 * BONUS:
+* MULTITHREADING
+*    Perhaps when we transfer the vertices from the quad buffer -> render_group's vertex buffer 
+*    we could parallelize it to work on multiple groups at once using a job system.
 * 
-* - MULTITHREADING
-*      Perhaps when we transfer the vertices from the quad buffer -> render_group's vertex buffer 
-*      we could parallelize it to work on multiple groups at once using a job system.
+* THE PROCESS OF RENDERING A QUAD:
+*     1.) There are a few things that need to be done before we can
+*         actually draw a quad. The first thing is that we can't draw a quad
+*         without first having a render_group created, so we need to bind one
+*         for use. The process of doing this looks like so:
+*
+*            - Create a "render_pass_desc" and fill it out. The
+*              render_pass_desc will contain data about what blendmode the
+*              pass need, what shader_id it desires for rendering, what
+*              layer it will be rendered on, what matrices it would like
+*              to render with, and what effects it would like the items
+*              within it to take on. After this struct has been filled out
+*              we will call the function "begin_render_pass()" and pass in
+*              the pointer to our "render_pass_desc". Using this
+*              "render_pass_desc" we will search the array of already
+*              generated render_groups to see if any of the already made
+*              render_groups suit the requirements needed by comparing
+*              their "render_pass_desc". If it finds an already made
+*              "render_group" that matches the "render_pass_desc" we pass,
+*              we will set the pointer in our "draw_frame_data" struct for
+*              "active_render_pass" to the render_group desired. If there
+*              is a not a "render_group" that matches our
+*              "render_pass_desc", then we create a new one and add it to
+*              the array of created "render_group"s setting that same
+*              "draw_frame_data" pointer to the pointer of this newly
+*              generated "render_group".
+*
+*     2.) After the "active_render_group" has been assigned, we can now
+*         call "draw_quad" with the information needed to render the
+*         quad. If the quad is textured we add it to the list of textures
+*         needed to draw the items in the "render_group". Should the
+*         number of textures exceed a certain set amount we will simply
+*         through a runtime error for the user. "draw_quad" will then add
+*         the quad's data to this "render_group", deferred the actual
+*         render process to later. Think of this as a "quad gathering"
+*         stage where we get all the data we want to render over the
+*         course of the frame, then prepare to render these quads at the
+*         very end of the frame.
+*
+*     3.) Finally, at the very end of the game frame before all the data
+*         gets rendered by the backend graphics API we process the quads
+*         inside of the quad buffers, transferring their vertex data from
+*         the "render_quad" container to the render_group's vertex
+*         buffer. Once this is done the group is ready to be passed along
+*         to the graphics api backend.
+*     
+*     4.) When you're done rendering with this render_pass_desc, you can
+*         call "end_render_pass()" which will set the "acitve_render_pass"
+*         to null.
+*
+*
+*  
+* A NOTE ABOUT THIS METHOD:
+*    - This approach also allows us to give the user the ability to
+*      slightly modify the shaders used for the effect stages. While
+*      the user will have to keep the same type of template for the
+*      effect (meaning they won't be able to change what textures are
+*      bound or what vertex attributes are present, they will still be
+*      able to change how the effect is applied in the shader) but the
+*      ability and freedom to adjust these passes is still present
+*
+*      We should also allow the user to create a "pipeline_desc" which will
+*      tell us what order the effects should be applied and what their
+*      individually intensities are. Intensities tell us how strong the
+*      effect is on it's framebuffer along with how much influence it has
+*      when being composited. 
+*
+* THE FULL BACKEND GRAPHICS PIPELINE:
+*    STAGES:
+*    1.) Draw all the "render_group" items that were created here in
+*        their desired order, treating them as their own
+*        renderpasses. We will render transparent objects in this way
+*        as well. We do this because we are in 2D and the render order
+*        must be preserved. The rendering will bind their needed
+*        shaders, textures, and other data needed for required shader
+*        renderering the scene using a forward renderer. This pass
+*        will render everything into a framebuffer of a size the user
+*        requests and will have no effects present in this rendered
+*        framebuffer, instead deferring the application of these
+*        effects later on into the pipeline.
+*
+*     2.) We will then loop through all of the "render_group" and check
+*        what effects each of these render_groups would like to have
+*        applied to them, calling a function that will apply the effect as
+*        desired, rendering these effects into their own framebuffer. Each
+*        effect will have it's own framebuffer. For example, Lighting will
+*        have a different framebuffer from that of bloom due to the
+*        different requirements for rendering they might have. We will
+*        do this by rendering the objects from the original pass (pass
+*        1) into a buffer where the shader will control how the effect
+*        gets applied. This effect will not be applied directly to the
+*        same framebuffer as pass 1 because we may want to be able to
+*        control how effects mix. (like how bloom would mix with film
+*        grain). We may in the future create a system that is able to
+*        process different effects in the same framebuffer, but this
+*        seems like a bad idea to me due to the shaders and scene
+*        graphing we'd have to do. 
+*         NOTE: Effects that could be able to be rendered together in the same
+                framebuffer would be. (example: tonemapping and
+                colorgrading. Just generally effects that don't need to be
+                independant of one another).
+*      
+*     3.) Then in this final pass we'll have some different functions that
+*         once again control how the effects get applied to the main game
+*         framebuffer. These contributions will also have their "contribution
+*         strengths" controllable through shader constants allowing us to
+*         configure how the effects get applied to this final pass, which will
+*         then get overlayed with the game framebuffer.
+*    
+*     4.) Lastly if the target window and the game framebuffer do not
+*         match in resolution we will blit the result to the screen,
+*         displaying the final output of the render pipeline to the
+*         screen.
 */
 
 Render_Group :: struct
